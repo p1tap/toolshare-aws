@@ -1,0 +1,70 @@
+{
+  "Comment": "ToolShare checkout saga: reserve -> charge -> confirm, with compensation on payment failure.",
+  "StartAt": "ReserveTool",
+  "States": {
+    "ReserveTool": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${ReserveToolFunctionArn}",
+        "Payload.$": "$"
+      },
+      "ResultSelector": {
+        "rentalId.$": "$.Payload.rentalId"
+      },
+      "ResultPath": "$.reservation",
+      "Next": "ChargePayment"
+    },
+    "ChargePayment": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${ChargePaymentFunctionArn}",
+        "Payload.$": "$"
+      },
+      "ResultSelector": {
+        "chargeId.$": "$.Payload.chargeId"
+      },
+      "ResultPath": "$.charge",
+      "Next": "ConfirmRental",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "CompensateReservation"
+        }
+      ]
+    },
+    "ConfirmRental": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${ConfirmRentalFunctionArn}",
+        "Payload.$": "$"
+      },
+      "ResultSelector": {
+        "status.$": "$.Payload.status"
+      },
+      "ResultPath": "$.confirmation",
+      "End": true
+    },
+    "CompensateReservation": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${CompensateReservationFunctionArn}",
+        "Payload.$": "$"
+      },
+      "ResultSelector": {
+        "status.$": "$.Payload.status"
+      },
+      "ResultPath": "$.compensation",
+      "Next": "PaymentFailed"
+    },
+    "PaymentFailed": {
+      "Type": "Fail",
+      "Error": "PaymentFailed",
+      "Cause": "Payment charge failed; reservation was released via compensation."
+    }
+  }
+}

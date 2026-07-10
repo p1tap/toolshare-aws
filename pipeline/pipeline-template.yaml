@@ -107,7 +107,9 @@ Resources:
                   - s3:PutBucketPolicy
                   - s3:PutBucketPublicAccessBlock
                   - s3:PutBucketCORS
+                  - s3:PutBucketNotification
                   - s3:GetBucketPolicy
+                  - s3:GetBucketNotification
                   - s3:GetObject
                   - s3:PutObject
                   - s3:DeleteObject
@@ -115,6 +117,103 @@ Resources:
                 Resource:
                   - !Sub arn:aws:s3:::toolshare-images-*
                   - !Sub arn:aws:s3:::toolshare-images-*/*
+
+              - Sid: Messaging
+                Effect: Allow
+                Action:
+                  - sns:CreateTopic
+                  - sns:DeleteTopic
+                  - sns:GetTopicAttributes
+                  - sns:SetTopicAttributes
+                  - sns:Subscribe
+                  - sns:Unsubscribe
+                  - sns:ListSubscriptionsByTopic
+                  - sns:TagResource
+                Resource:
+                  - !Sub arn:aws:sns:ap-southeast-1:${AccountId}:toolshare-*
+
+              - Sid: Queues
+                Effect: Allow
+                Action:
+                  - sqs:CreateQueue
+                  - sqs:DeleteQueue
+                  - sqs:GetQueueAttributes
+                  - sqs:SetQueueAttributes
+                  - sqs:TagQueue
+                Resource:
+                  - !Sub arn:aws:sqs:ap-southeast-1:${AccountId}:toolshare-*
+
+              - Sid: LambdaEventSourceMappings
+                Effect: Allow
+                Action:
+                  - lambda:CreateEventSourceMapping
+                  - lambda:DeleteEventSourceMapping
+                  - lambda:GetEventSourceMapping
+                  - lambda:UpdateEventSourceMapping
+                Resource: '*'
+
+              - Sid: StepFunctionsSaga
+                Effect: Allow
+                Action:
+                  - states:CreateStateMachine
+                  - states:DeleteStateMachine
+                  - states:UpdateStateMachine
+                  - states:DescribeStateMachine
+                  - states:TagResource
+                Resource:
+                  - !Sub arn:aws:states:ap-southeast-1:${AccountId}:stateMachine:toolshare-*
+
+              - Sid: PaymentSecret
+                Effect: Allow
+                Action:
+                  - secretsmanager:CreateSecret
+                  - secretsmanager:DeleteSecret
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:TagResource
+                  - secretsmanager:UpdateSecret
+                Resource:
+                  - !Sub arn:aws:secretsmanager:ap-southeast-1:${AccountId}:secret:toolshare/*
+
+              - Sid: EventBridgeRules
+                Effect: Allow
+                Action:
+                  - events:PutRule
+                  - events:DeleteRule
+                  - events:DescribeRule
+                  - events:PutTargets
+                  - events:RemoveTargets
+                Resource:
+                  - !Sub arn:aws:events:ap-southeast-1:${AccountId}:rule/toolshare-*
+
+              - Sid: CognitoUserPool
+                Effect: Allow
+                Action:
+                  - cognito-idp:CreateUserPool
+                  - cognito-idp:DeleteUserPool
+                  - cognito-idp:UpdateUserPool
+                  - cognito-idp:DescribeUserPool
+                  - cognito-idp:CreateUserPoolClient
+                  - cognito-idp:DeleteUserPoolClient
+                  - cognito-idp:UpdateUserPoolClient
+                  - cognito-idp:DescribeUserPoolClient
+                  - cognito-idp:CreateGroup
+                  - cognito-idp:DeleteGroup
+                  - cognito-idp:GetGroup
+                  - cognito-idp:TagResource
+                Resource:
+                  - !Sub arn:aws:cognito-idp:ap-southeast-1:${AccountId}:userpool/*
+
+              - Sid: StateMachineLogGroup
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:DeleteLogGroup
+                  - logs:DescribeLogGroups
+                  - logs:PutRetentionPolicy
+                Resource:
+                  - !Sub arn:aws:logs:ap-southeast-1:${AccountId}:log-group:/aws/vendedlogs/states/toolshare-*
+                  - !Sub arn:aws:logs:ap-southeast-1:${AccountId}:log-group:/aws/vendedlogs/states/toolshare-*:*
 
               - Sid: CloudFormationApp
                 Effect: Allow
@@ -166,6 +265,8 @@ Resources:
                 Resource:
                   - !Sub arn:aws:dynamodb:ap-southeast-1:${AccountId}:table/toolshare-tools-*
                   - !Sub arn:aws:dynamodb:ap-southeast-1:${AccountId}:table/toolshare-tools-*/index/*
+                  - !Sub arn:aws:dynamodb:ap-southeast-1:${AccountId}:table/toolshare-rentals-*
+                  - !Sub arn:aws:dynamodb:ap-southeast-1:${AccountId}:table/toolshare-rentals-*/index/*
 
               - Sid: ApiGatewayV2
                 Effect: Allow
@@ -242,6 +343,15 @@ Resources:
                 Condition:
                   StringEquals:
                     iam:PassedToService: codedeploy.amazonaws.com
+
+              - Sid: PassRoleToStates
+                Effect: Allow
+                Action: iam:PassRole
+                Resource:
+                  - !Sub arn:aws:iam::${AccountId}:role/toolshare-*
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: states.amazonaws.com
 
               - Sid: ReadStackOutputsForSmoke
                 Effect: Allow

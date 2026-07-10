@@ -15,6 +15,13 @@ Parameters:
       Fraction (0-1) of createTool calls to deliberately fail with a 500,
       for the canary-rollback demo. Leave at 0 for normal operation.
     Default: '0'
+  PaymentChaosFailRate:
+    Type: String
+    Description: >
+      Fraction (0-1) of checkout payments to deliberately fail, for the
+      Step Functions saga-compensation demo. Leave at 0 for normal
+      operation.
+    Default: '0'
 
 Globals:
   Function:
@@ -137,6 +144,87 @@ Resources:
           Projection:
             ProjectionType: ALL
 
+  # --- M10: messaging (SNS FIFO fanout -> 2 SQS FIFO queues) ---------------
+
+  RentalEventsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub toolshare-rental-events-${Stage}.fifo
+      FifoTopic: true
+      ContentBasedDeduplication: true
+
+  NotifyOwnerDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub toolshare-notify-owner-dlq-${Stage}.fifo
+      FifoQueue: true
+
+  NotifyOwnerQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub toolshare-notify-owner-${Stage}.fifo
+      FifoQueue: true
+      ContentBasedDeduplication: true
+      VisibilityTimeout: 30
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt NotifyOwnerDlq.Arn
+        maxReceiveCount: 3
+
+  AuditLogQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub toolshare-audit-log-${Stage}.fifo
+      FifoQueue: true
+      ContentBasedDeduplication: true
+      VisibilityTimeout: 30
+
+  RentalEventsTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics: [!Ref RentalEventsTopic]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action: sqs:SendMessage
+            Resource:
+              - !GetAtt NotifyOwnerQueue.Arn
+              - !GetAtt AuditLogQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref RentalEventsTopic
+
+  NotifyOwnerSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref RentalEventsTopic
+      Protocol: sqs
+      Endpoint: !GetAtt NotifyOwnerQueue.Arn
+      RawMessageDelivery: true
+
+  AuditLogSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref RentalEventsTopic
+      Protocol: sqs
+      Endpoint: !GetAtt AuditLogQueue.Arn
+      RawMessageDelivery: true
+
+  # --- M12: mock payment secret ---------------------------------------------
+
+  MockPaymentSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub toolshare/mock-payment-key-${Stage}
+      Description: Mock third-party payment gateway API key (demo only).
+      GenerateSecretString:
+        SecretStringTemplate: '{"provider":"mock-gateway"}'
+        GenerateStringKey: apiKey
+        PasswordLength: 32
+        ExcludePunctuation: true
+
   HttpApi:
     Type: AWS::Serverless::HttpApi
     Properties:
@@ -257,11 +345,18 @@ Resources:
       FunctionName: !Sub toolshare-create-rental-${Stage}
       CodeUri: src/
       Handler: handlers/createRental.handler
+      Environment:
+        Variables:
+          RENTAL_EVENTS_TOPIC_ARN: !Ref RentalEventsTopic
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref ToolsTable
         - DynamoDBWritePolicy:
             TableName: !Ref RentalsTable
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt RentalEventsTopic.TopicName
+        - EventBridgePutEventsPolicy:
+            EventBusName: default
       Events:
         Api:
           Type: HttpApi
@@ -310,6 +405,184 @@ Resources:
             Auth:
               Authorizer: CognitoJwt
 
+  # --- M10 workers: SQS FIFO consumers off the SNS fanout ------------------
+
+  NotifyOwnerWorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub toolshare-notify-owner-worker-${Stage}
+      CodeUri: src/
+      Handler: handlers/notifyOwnerWorker.handler
+      Events:
+        Sqs:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt NotifyOwnerQueue.Arn
+            BatchSize: 1
+
+  AuditLogWorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub toolshare-audit-log-worker-${Stage}
+      CodeUri: src/
+      Handler: handlers/auditLogWorker.handler
+      Events:
+        Sqs:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt AuditLogQueue.Arn
+            BatchSize: 1
+
+  # --- M11: checkout saga (Step Functions Express) --------------------------
+
+  ReserveToolFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub toolshare-reserve-tool-${Stage}
+      CodeUri: src/
+      Handler: handlers/reserveTool.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RentalsTable
+
+  ChargePaymentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub toolshare-charge-payment-${Stage}
+      CodeUri: src/
+      Handler: handlers/chargePayment.handler
+      Environment:
+        Variables:
+          PAYMENT_CHAOS_FAIL_RATE: !Ref PaymentChaosFailRate
+          PAYMENT_SECRET_ARN: !Ref MockPaymentSecret
+      Policies:
+        - Statement:
+            - Sid: ReadPaymentSecret
+              Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref MockPaymentSecret
+
+  ConfirmRentalFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub toolshare-confirm-rental-${Stage}
+      CodeUri: src/
+      Handler: handlers/confirmRental.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RentalsTable
+
+  CompensateReservationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub toolshare-compensate-reservation-${Stage}
+      CodeUri: src/
+      Handler: handlers/compensateReservation.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RentalsTable
+
+  CheckoutStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub toolshare-checkout-${Stage}
+      Type: EXPRESS
+      DefinitionUri: statemachine/checkout.asl.json
+      DefinitionSubstitutions:
+        ReserveToolFunctionArn: !GetAtt ReserveToolFunction.Arn
+        ChargePaymentFunctionArn: !GetAtt ChargePaymentFunction.Arn
+        ConfirmRentalFunctionArn: !GetAtt ConfirmRentalFunction.Arn
+        CompensateReservationFunctionArn: !GetAtt CompensateReservationFunction.Arn
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref ReserveToolFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref ChargePaymentFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref ConfirmRentalFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref CompensateReservationFunction
+      Logging:
+        Level: ERROR
+        IncludeExecutionData: false
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt CheckoutStateMachineLogGroup.Arn
+
+  CheckoutStateMachineLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/vendedlogs/states/toolshare-checkout-${Stage}
+      RetentionInDays: 14
+
+  StartCheckoutFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub toolshare-start-checkout-${Stage}
+      CodeUri: src/
+      Handler: handlers/startCheckout.handler
+      Environment:
+        Variables:
+          RENTALS_TABLE: !Ref RentalsTable
+          CHECKOUT_STATE_MACHINE_ARN: !Ref CheckoutStateMachine
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref RentalsTable
+        - StepFunctionsExecutionPolicy:
+            StateMachineName: !GetAtt CheckoutStateMachine.Name
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /rentals/{rentalId}/checkout
+            Method: POST
+            Auth:
+              Authorizer: CognitoJwt
+
+  # --- M7: S3-event thumbnailer + EventBridge -------------------------------
+
+  ThumbnailFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub toolshare-thumbnail-${Stage}
+      CodeUri: src/
+      Handler: handlers/thumbnail.handler
+      # Deliberately not !Ref/!GetAtt ToolImagesBucket anywhere else on
+      # this function: the S3 event below already creates a bucket<->
+      # function edge, and a second edge (e.g. via S3ReadPolicy's !Ref)
+      # makes CloudFormation see it as circular. Same reasoning for the
+      # env var override just below.
+      Environment:
+        Variables:
+          UPLOAD_BUCKET: !Sub toolshare-images-${Stage}-${AWS::AccountId}
+      Policies:
+        - Statement:
+            - Sid: ReadUploadedImage
+              Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub arn:aws:s3:::toolshare-images-${Stage}-${AWS::AccountId}/*
+      Events:
+        ImageUploaded:
+          Type: S3
+          Properties:
+            Bucket: !Ref ToolImagesBucket
+            Events: s3:ObjectCreated:*
+
+  AnalyticsEventFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub toolshare-analytics-event-${Stage}
+      CodeUri: src/
+      Handler: handlers/analyticsEvent.handler
+      Events:
+        RentalCreated:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source: [toolshare.rentals]
+              detail-type: [RentalCreated]
+
   HealthFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -338,3 +611,9 @@ Outputs:
     Value: !Ref UserPool
   UserPoolClientId:
     Value: !Ref UserPoolClient
+  RentalEventsTopicArn:
+    Value: !Ref RentalEventsTopic
+  CheckoutStateMachineArn:
+    Value: !Ref CheckoutStateMachine
+  NotifyOwnerDlqUrl:
+    Value: !Ref NotifyOwnerDlq

@@ -1,8 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
+import { SNSClient, PublishCommand } from "@aws-sdk/client-sns";
+import { EventBridgeClient, PutEventsCommand } from "@aws-sdk/client-eventbridge";
 import { ddb, TOOLS_TABLE } from "../lib/dynamo.mjs";
 import { getIdentity } from "../lib/auth.mjs";
 import { json } from "../lib/response.mjs";
+
+const sns = new SNSClient({});
+const eventBridge = new EventBridgeClient({});
 
 const RENTALS_TABLE = process.env.RENTALS_TABLE;
 
@@ -61,6 +66,43 @@ export const handler = async (event) => {
     };
 
     await ddb.send(new PutCommand({ TableName: RENTALS_TABLE, Item: rental }));
+
+    // Fire-and-forget: a notification failure should never fail the
+    // booking itself. Group by toolId so per-tool events stay ordered.
+    if (process.env.RENTAL_EVENTS_TOPIC_ARN) {
+      try {
+        await sns.send(
+          new PublishCommand({
+            TopicArn: process.env.RENTAL_EVENTS_TOPIC_ARN,
+            Message: JSON.stringify({ type: "RentalCreated", ...rental }),
+            MessageGroupId: rental.toolId,
+            MessageDeduplicationId: rental.rentalId,
+          })
+        );
+      } catch (err) {
+        console.error("rental-events publish failed (non-fatal):", err);
+      }
+    }
+
+    // Second, decoupled consumer path: EventBridge fans this out to
+    // whatever else wants to react (analytics today, more rules later)
+    // without coupling createRental to those consumers.
+    try {
+      await eventBridge.send(
+        new PutEventsCommand({
+          Entries: [
+            {
+              Source: "toolshare.rentals",
+              DetailType: "RentalCreated",
+              Detail: JSON.stringify(rental),
+            },
+          ],
+        })
+      );
+    } catch (err) {
+      console.error("eventbridge publish failed (non-fatal):", err);
+    }
+
     return json(201, rental);
   } catch (err) {
     console.error("createRental failed:", err);
