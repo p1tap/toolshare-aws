@@ -1,0 +1,156 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  ToolShare on AWS — serverless re-platform of db-toolshare.
+  Stage-parameterized: same template deploys staging and prod.
+
+Parameters:
+  Stage:
+    Type: String
+    AllowedValues: [staging, prod]
+    Default: staging
+
+Globals:
+  Function:
+    Runtime: nodejs24.x
+    Architectures: [arm64]
+    MemorySize: 256
+    Timeout: 10
+    Environment:
+      Variables:
+        TOOLS_TABLE: !Ref ToolsTable
+        UPLOAD_BUCKET: !Ref ToolImagesBucket
+        STAGE: !Ref Stage
+
+Resources:
+  ToolsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub toolshare-tools-${Stage}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: toolId
+          AttributeType: S
+        - AttributeName: ownerId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: toolId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: owner-index
+          KeySchema:
+            - AttributeName: ownerId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  ToolImagesBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub toolshare-images-${Stage}-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedMethods: [GET, PUT]
+            AllowedOrigins: ['*']
+            AllowedHeaders: ['*']
+
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref Stage
+
+  ListToolsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub toolshare-list-tools-${Stage}
+      CodeUri: src/
+      Handler: handlers/listTools.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ToolsTable
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /tools
+            Method: GET
+
+  GetToolFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub toolshare-get-tool-${Stage}
+      CodeUri: src/
+      Handler: handlers/getTool.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ToolsTable
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /tools/{toolId}
+            Method: GET
+
+  CreateToolFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub toolshare-create-tool-${Stage}
+      CodeUri: src/
+      Handler: handlers/createTool.handler
+      Policies:
+        - DynamoDBWritePolicy:
+            TableName: !Ref ToolsTable
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /tools
+            Method: POST
+
+  PresignUploadFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub toolshare-presign-upload-${Stage}
+      CodeUri: src/
+      Handler: handlers/presignUpload.handler
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref ToolImagesBucket
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /tools/{toolId}/upload-url
+            Method: POST
+
+  HealthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub toolshare-health-${Stage}
+      CodeUri: src/
+      Handler: handlers/health.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /health
+            Method: GET
+
+Outputs:
+  ApiUrl:
+    Description: HTTP API base URL
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}
+  ToolsTableName:
+    Value: !Ref ToolsTable
+  ImagesBucketName:
+    Value: !Ref ToolImagesBucket
