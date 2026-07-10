@@ -1,0 +1,16 @@
+version: 0.2
+
+# STAGE env var ("staging" or "prod") is set per pipeline-stage action override.
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 20
+    commands:
+      - pip install --quiet aws-sam-cli
+      - npm ci
+  build:
+    commands:
+      - test -n "$STAGE"
+      - sam build
+      - sam deploy --config-env "$STAGE" --no-confirm-changeset --no-fail-on-empty-changeset
