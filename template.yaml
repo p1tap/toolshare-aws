@@ -9,6 +9,12 @@ Parameters:
     Type: String
     AllowedValues: [staging, prod]
     Default: staging
+  ChaosFailRate:
+    Type: String
+    Description: >
+      Fraction (0-1) of createTool calls to deliberately fail with a 500,
+      for the canary-rollback demo. Leave at 0 for normal operation.
+    Default: '0'
 
 Globals:
   Function:
@@ -19,6 +25,7 @@ Globals:
     Environment:
       Variables:
         TOOLS_TABLE: !Ref ToolsTable
+        RENTALS_TABLE: !Ref RentalsTable
         UPLOAD_BUCKET: !Ref ToolImagesBucket
         STAGE: !Ref Stage
 
@@ -59,10 +66,89 @@ Resources:
             AllowedOrigins: ['*']
             AllowedHeaders: ['*']
 
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub toolshare-users-${Stage}
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub toolshare-api-client-${Stage}
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+
+  CustomerGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: customer
+      UserPoolId: !Ref UserPool
+
+  RenterGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: renter
+      UserPoolId: !Ref UserPool
+
+  AdminGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: admin
+      UserPoolId: !Ref UserPool
+
+  RentalsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub toolshare-rentals-${Stage}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: rentalId
+          AttributeType: S
+        - AttributeName: renterId
+          AttributeType: S
+        - AttributeName: toolId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: rentalId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: renter-index
+          KeySchema:
+            - AttributeName: renterId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: tool-index
+          KeySchema:
+            - AttributeName: toolId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
   HttpApi:
     Type: AWS::Serverless::HttpApi
     Properties:
       StageName: !Ref Stage
+      Auth:
+        Authorizers:
+          CognitoJwt:
+            IdentitySource: $request.header.Authorization
+            JwtConfiguration:
+              issuer: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}
+              audience:
+                - !Ref UserPoolClient
 
   ListToolsFunction:
     Type: AWS::Serverless::Function
@@ -104,6 +190,9 @@ Resources:
       FunctionName: !Sub toolshare-create-tool-${Stage}
       CodeUri: src/
       Handler: handlers/createTool.handler
+      Environment:
+        Variables:
+          CHAOS_FAIL_RATE: !Ref ChaosFailRate
       Policies:
         - DynamoDBWritePolicy:
             TableName: !Ref ToolsTable
@@ -114,6 +203,34 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /tools
             Method: POST
+            Auth:
+              Authorizer: CognitoJwt
+      AutoPublishAlias: live
+      DeploymentPreference:
+        Type: Linear10PercentEvery1Minute
+        Alarms:
+          - !Ref CreateToolErrorAlarm
+
+  CreateToolErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub toolshare-create-tool-errors-${Stage}
+      AlarmDescription: >
+        Fires on any error from the live alias during a canary shift;
+        SAM/CodeDeploy auto-rolls back the traffic shift when this trips.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Sub toolshare-create-tool-${Stage}
+        - Name: Resource
+          Value: !Sub toolshare-create-tool-${Stage}:live
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
 
   PresignUploadFunction:
     Type: AWS::Serverless::Function
@@ -131,6 +248,67 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /tools/{toolId}/upload-url
             Method: POST
+            Auth:
+              Authorizer: CognitoJwt
+
+  CreateRentalFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub toolshare-create-rental-${Stage}
+      CodeUri: src/
+      Handler: handlers/createRental.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ToolsTable
+        - DynamoDBWritePolicy:
+            TableName: !Ref RentalsTable
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /rentals
+            Method: POST
+            Auth:
+              Authorizer: CognitoJwt
+
+  ListMyRentalsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub toolshare-list-my-rentals-${Stage}
+      CodeUri: src/
+      Handler: handlers/listMyRentals.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref RentalsTable
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /rentals/mine
+            Method: GET
+            Auth:
+              Authorizer: CognitoJwt
+
+  ReturnRentalFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub toolshare-return-rental-${Stage}
+      CodeUri: src/
+      Handler: handlers/returnRental.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RentalsTable
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /rentals/{rentalId}/return
+            Method: POST
+            Auth:
+              Authorizer: CognitoJwt
 
   HealthFunction:
     Type: AWS::Serverless::Function
@@ -152,5 +330,11 @@ Outputs:
     Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}
   ToolsTableName:
     Value: !Ref ToolsTable
+  RentalsTableName:
+    Value: !Ref RentalsTable
   ImagesBucketName:
     Value: !Ref ToolImagesBucket
+  UserPoolId:
+    Value: !Ref UserPool
+  UserPoolClientId:
+    Value: !Ref UserPoolClient

@@ -179,6 +179,37 @@ Resources:
                   - !Sub arn:aws:apigateway:ap-southeast-1::/apis
                   - !Sub arn:aws:apigateway:ap-southeast-1::/apis/*
 
+              - Sid: CodeDeployCanary
+                Effect: Allow
+                Action:
+                  - codedeploy:CreateApplication
+                  - codedeploy:DeleteApplication
+                  - codedeploy:GetApplication
+                  - codedeploy:CreateDeploymentGroup
+                  - codedeploy:UpdateDeploymentGroup
+                  - codedeploy:DeleteDeploymentGroup
+                  - codedeploy:GetDeploymentGroup
+                  - codedeploy:CreateDeployment
+                  - codedeploy:GetDeployment
+                  - codedeploy:GetDeploymentConfig
+                  - codedeploy:RegisterApplicationRevision
+                  - codedeploy:ListApplications
+                  - codedeploy:ListDeploymentGroups
+                  - codedeploy:TagResource
+                # CodeDeploy application/deployment-group ARNs aren't
+                # knowable before SAM creates them on first deploy, same
+                # constraint as the ApiGatewayV2 statement above.
+                Resource: '*'
+
+              - Sid: CloudWatchAlarmsForCanary
+                Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricAlarm
+                  - cloudwatch:DeleteAlarms
+                  - cloudwatch:DescribeAlarms
+                Resource:
+                  - !Sub arn:aws:cloudwatch:ap-southeast-1:${AccountId}:alarm:toolshare-*
+
               - Sid: IamForFunctionRoles
                 Effect: Allow
                 Action:
@@ -202,6 +233,15 @@ Resources:
                 Condition:
                   StringEquals:
                     iam:PassedToService: lambda.amazonaws.com
+
+              - Sid: PassRoleToCodeDeploy
+                Effect: Allow
+                Action: iam:PassRole
+                Resource:
+                  - !Sub arn:aws:iam::${AccountId}:role/toolshare-*
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: codedeploy.amazonaws.com
 
               - Sid: ReadStackOutputsForSmoke
                 Effect: Allow

@@ -4,6 +4,12 @@ import { ddb, TOOLS_TABLE } from "../lib/dynamo.mjs";
 import { json } from "../lib/response.mjs";
 
 export const handler = async (event) => {
+  const chaosRate = parseFloat(process.env.CHAOS_FAIL_RATE ?? "0");
+  if (chaosRate > 0 && Math.random() < chaosRate) {
+    console.error("chaos knob: injected failure");
+    return json(500, { error: "Internal error (chaos injection)" });
+  }
+
   let body;
   try {
     body = JSON.parse(event.body ?? "{}");
