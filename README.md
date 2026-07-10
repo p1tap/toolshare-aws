@@ -1,10 +1,9 @@
-# ToolShare on AWS
+# ToolShare AWS
 
-Serverless re-platform of [db-toolshare](https://github.com/p1tap/db-toolshare)
-(Next.js/Postgres marketplace) onto AWS, built CI/CD-first: the delivery
-pipeline goes in on day one, and every feature after that ships to
-production through it — canary deploy, automated smoke gate, manual
-approval, automatic rollback on error.
+A serverless tool-rental marketplace on AWS, built CI/CD-first: the
+delivery pipeline goes in on day one, and every feature after that
+ships to production through it — canary deploy, automated smoke gate,
+manual approval, automatic rollback on error.
 
 ## Architecture
 
@@ -94,10 +93,9 @@ The pipeline was originally built on **CodePipeline V2 + CodeBuild**
 (`pipeline/pipeline-template.yaml` — still in this repo as reference).
 It hit an account-level CodeBuild quota of **0 concurrent builds** —
 not a visible Service Quotas value, but a separate new-account
-fraud-prevention gate. AWS Support was engaged (case
-178364607000836) and ultimately **declined** to raise it: *"quotas are
-evaluated based on account history, usage patterns, and other
-factors."*
+fraud-prevention gate. AWS Support was engaged and ultimately
+**declined** to raise it: *"quotas are evaluated based on account
+history, usage patterns, and other factors."*
 
 Rather than block the project on an account-level decision outside my
 control, I moved the CI runner to GitHub Actions, which needed no
@@ -131,10 +129,8 @@ record itself (mock gateway, no separate payments table).
 
 Cognito **is** the user store — no separate users table, no
 hand-rolled password hashing. Roles are Cognito groups (`customer`,
-`renter`, `admin`) carried in the JWT and checked in each Lambda. This
-is the direct fix for two real issues in the original db-toolshare
-repo: a hardcoded DB password fallback and a client-side role dropdown
-that trusted the browser. See db-toolshare's README for that writeup.
+`renter`, `admin`) carried in the JWT and verified server-side in each
+Lambda — the client is never trusted with role decisions.
 
 ## Module coverage (AWS Academy Cloud Developing, by feature)
 

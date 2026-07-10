@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  ToolShare on AWS — serverless re-platform of db-toolshare.
+  ToolShare AWS — serverless tool-rental marketplace.
   Stage-parameterized: same template deploys staging and prod.
 
 Parameters:
