@@ -1,0 +1,122 @@
+# CI/CD: test -> deploy staging -> smoke gate -> manual approval -> deploy
+# prod -> smoke gate. Auth is OIDC role assumption (pipeline/github-oidc.yaml)
+# so no AWS keys are stored in GitHub. The prod gate is the `production`
+# environment's required-reviewer protection rule.
+#
+# This replaced the CodePipeline/CodeBuild stack (pipeline-template.yaml)
+# after AWS declined to lift the account's CodeBuild concurrency quota of 0;
+# the CodeDeploy canary + auto-rollback is untouched since sam deploy
+# triggers it, not the pipeline runner.
+
+name: pipeline
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: pipeline-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-southeast-1
+  ROLE_ARN: arn:aws:iam::115568633446:role/toolshare-github-actions-role
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  deploy-staging:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - run: sam build
+      - run: sam deploy --config-env staging --no-confirm-changeset --no-fail-on-empty-changeset
+
+  smoke-staging:
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - run: npm ci
+      # Look up the live stack's API URL rather than trusting a passed
+      # artifact, so the smoke gate always tests what's actually deployed.
+      - run: |
+          API_URL=$(aws cloudformation describe-stacks \
+            --stack-name toolshare-staging \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" \
+            --output text)
+          echo "Smoke testing $API_URL"
+          API_URL="$API_URL" npm run smoke
+
+  deploy-prod:
+    needs: smoke-staging
+    runs-on: ubuntu-latest
+    # The `production` environment carries a required-reviewer protection
+    # rule (GitHub repo Settings -> Environments), which pauses this job
+    # until manually approved.
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - run: sam build
+      - run: sam deploy --config-env prod --no-confirm-changeset --no-fail-on-empty-changeset
+
+  smoke-prod:
+    needs: deploy-prod
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - run: npm ci
+      - run: |
+          API_URL=$(aws cloudformation describe-stacks \
+            --stack-name toolshare-prod \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" \
+            --output text)
+          echo "Smoke testing $API_URL"
+          API_URL="$API_URL" npm run smoke

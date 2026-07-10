@@ -1,0 +1,326 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  GitHub Actions OIDC deployer for toolshare. GitHub's OIDC provider is
+  trusted to assume a least-privilege role scoped to this repo only, so no
+  long-lived AWS keys are ever stored in GitHub. The role's permissions
+  mirror the audited CodeBuild service role in pipeline-template.yaml
+  (CI runner moved to GitHub Actions after an account-level CodeBuild
+  concurrency quota of 0 could not be lifted).
+
+Parameters:
+  RepositoryId:
+    Type: String
+    Default: p1tap/toolshare-aws
+    Description: GitHub org/repo allowed to assume the deployer role.
+  AccountId:
+    Type: String
+    Default: '115568633446'
+
+Resources:
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      # AWS now pins GitHub's root CA internally; thumbprints are kept for
+      # CloudFormation schema compliance.
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+        - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
+
+  GitHubActionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: toolshare-github-actions-role
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !GetAtt GitHubOidcProvider.Arn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub repo:${RepositoryId}:*
+      Policies:
+        - PolicyName: toolshare-github-actions-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: SamArtifacts
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub arn:aws:s3:::toolshare-sam-artifacts-${AccountId}
+                  - !Sub arn:aws:s3:::toolshare-sam-artifacts-${AccountId}/*
+
+              - Sid: AppBuckets
+                Effect: Allow
+                Action:
+                  - s3:CreateBucket
+                  - s3:PutBucketPolicy
+                  - s3:PutBucketPublicAccessBlock
+                  - s3:PutBucketCORS
+                  - s3:PutBucketNotification
+                  - s3:GetBucketPolicy
+                  - s3:GetBucketNotification
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:PutLifecycleConfiguration
+                Resource:
+                  - !Sub arn:aws:s3:::toolshare-images-*
+                  - !Sub arn:aws:s3:::toolshare-images-*/*
+
+              - Sid: Messaging
+                Effect: Allow
+                Action:
+                  - sns:CreateTopic
+                  - sns:DeleteTopic
+                  - sns:GetTopicAttributes
+                  - sns:SetTopicAttributes
+                  - sns:Subscribe
+                  - sns:Unsubscribe
+                  - sns:ListSubscriptionsByTopic
+                  - sns:TagResource
+                Resource:
+                  - !Sub arn:aws:sns:ap-southeast-1:${AccountId}:toolshare-*
+
+              - Sid: Queues
+                Effect: Allow
+                Action:
+                  - sqs:CreateQueue
+                  - sqs:DeleteQueue
+                  - sqs:GetQueueAttributes
+                  - sqs:SetQueueAttributes
+                  - sqs:TagQueue
+                Resource:
+                  - !Sub arn:aws:sqs:ap-southeast-1:${AccountId}:toolshare-*
+
+              - Sid: LambdaEventSourceMappings
+                Effect: Allow
+                Action:
+                  - lambda:CreateEventSourceMapping
+                  - lambda:DeleteEventSourceMapping
+                  - lambda:GetEventSourceMapping
+                  - lambda:UpdateEventSourceMapping
+                Resource: '*'
+
+              - Sid: StepFunctionsSaga
+                Effect: Allow
+                Action:
+                  - states:CreateStateMachine
+                  - states:DeleteStateMachine
+                  - states:UpdateStateMachine
+                  - states:DescribeStateMachine
+                  - states:TagResource
+                Resource:
+                  - !Sub arn:aws:states:ap-southeast-1:${AccountId}:stateMachine:toolshare-*
+
+              - Sid: PaymentSecret
+                Effect: Allow
+                Action:
+                  - secretsmanager:CreateSecret
+                  - secretsmanager:DeleteSecret
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:TagResource
+                  - secretsmanager:UpdateSecret
+                Resource:
+                  - !Sub arn:aws:secretsmanager:ap-southeast-1:${AccountId}:secret:toolshare/*
+
+              - Sid: EventBridgeRules
+                Effect: Allow
+                Action:
+                  - events:PutRule
+                  - events:DeleteRule
+                  - events:DescribeRule
+                  - events:PutTargets
+                  - events:RemoveTargets
+                Resource:
+                  - !Sub arn:aws:events:ap-southeast-1:${AccountId}:rule/toolshare-*
+
+              - Sid: CognitoUserPool
+                Effect: Allow
+                Action:
+                  - cognito-idp:CreateUserPool
+                  - cognito-idp:DeleteUserPool
+                  - cognito-idp:UpdateUserPool
+                  - cognito-idp:DescribeUserPool
+                  - cognito-idp:CreateUserPoolClient
+                  - cognito-idp:DeleteUserPoolClient
+                  - cognito-idp:UpdateUserPoolClient
+                  - cognito-idp:DescribeUserPoolClient
+                  - cognito-idp:CreateGroup
+                  - cognito-idp:DeleteGroup
+                  - cognito-idp:GetGroup
+                  - cognito-idp:TagResource
+                Resource:
+                  - !Sub arn:aws:cognito-idp:ap-southeast-1:${AccountId}:userpool/*
+
+              - Sid: StateMachineLogGroup
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:DeleteLogGroup
+                  - logs:DescribeLogGroups
+                  - logs:PutRetentionPolicy
+                Resource:
+                  - !Sub arn:aws:logs:ap-southeast-1:${AccountId}:log-group:/aws/vendedlogs/states/toolshare-*
+                  - !Sub arn:aws:logs:ap-southeast-1:${AccountId}:log-group:/aws/vendedlogs/states/toolshare-*:*
+
+              - Sid: CloudFormationApp
+                Effect: Allow
+                Action:
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStackResource
+                  - cloudformation:DescribeStackResources
+                  - cloudformation:GetTemplate
+                  - cloudformation:GetTemplateSummary
+                  - cloudformation:ListStackResources
+                  - cloudformation:ValidateTemplate
+                Resource:
+                  - !Sub arn:aws:cloudformation:ap-southeast-1:${AccountId}:stack/toolshare-staging/*
+                  - !Sub arn:aws:cloudformation:ap-southeast-1:${AccountId}:stack/toolshare-prod/*
+
+              - Sid: Lambda
+                Effect: Allow
+                Action:
+                  - lambda:CreateFunction
+                  - lambda:UpdateFunctionCode
+                  - lambda:UpdateFunctionConfiguration
+                  - lambda:GetFunction
+                  - lambda:GetFunctionConfiguration
+                  - lambda:DeleteFunction
+                  - lambda:AddPermission
+                  - lambda:RemovePermission
+                  - lambda:TagResource
+                  - lambda:PublishVersion
+                  - lambda:CreateAlias
+                  - lambda:UpdateAlias
+                  - lambda:GetAlias
+                  - lambda:ListVersionsByFunction
+                Resource:
+                  - !Sub arn:aws:lambda:ap-southeast-1:${AccountId}:function:toolshare-*
+
+              - Sid: DynamoDB
+                Effect: Allow
+                Action:
+                  - dynamodb:CreateTable
+                  - dynamodb:UpdateTable
+                  - dynamodb:DeleteTable
+                  - dynamodb:DescribeTable
+                  - dynamodb:TagResource
+                Resource:
+                  - !Sub arn:aws:dynamodb:ap-southeast-1:${AccountId}:table/toolshare-tools-*
+                  - !Sub arn:aws:dynamodb:ap-southeast-1:${AccountId}:table/toolshare-tools-*/index/*
+                  - !Sub arn:aws:dynamodb:ap-southeast-1:${AccountId}:table/toolshare-rentals-*
+                  - !Sub arn:aws:dynamodb:ap-southeast-1:${AccountId}:table/toolshare-rentals-*/index/*
+
+              - Sid: ApiGatewayV2
+                Effect: Allow
+                Action:
+                  - apigateway:GET
+                  - apigateway:POST
+                  - apigateway:PUT
+                  - apigateway:DELETE
+                  - apigateway:PATCH
+                Resource:
+                  - !Sub arn:aws:apigateway:ap-southeast-1::/apis
+                  - !Sub arn:aws:apigateway:ap-southeast-1::/apis/*
+
+              - Sid: CodeDeployCanary
+                Effect: Allow
+                Action:
+                  - codedeploy:CreateApplication
+                  - codedeploy:DeleteApplication
+                  - codedeploy:GetApplication
+                  - codedeploy:CreateDeploymentGroup
+                  - codedeploy:UpdateDeploymentGroup
+                  - codedeploy:DeleteDeploymentGroup
+                  - codedeploy:GetDeploymentGroup
+                  - codedeploy:CreateDeployment
+                  - codedeploy:GetDeployment
+                  - codedeploy:GetDeploymentConfig
+                  - codedeploy:RegisterApplicationRevision
+                  - codedeploy:ListApplications
+                  - codedeploy:ListDeploymentGroups
+                  - codedeploy:TagResource
+                # CodeDeploy application/deployment-group ARNs aren't
+                # knowable before SAM creates them on first deploy, same
+                # constraint as the ApiGatewayV2 statement above.
+                Resource: '*'
+
+              - Sid: CloudWatchAlarmsForCanary
+                Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricAlarm
+                  - cloudwatch:DeleteAlarms
+                  - cloudwatch:DescribeAlarms
+                Resource:
+                  - !Sub arn:aws:cloudwatch:ap-southeast-1:${AccountId}:alarm:toolshare-*
+
+              - Sid: IamForFunctionRoles
+                Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:GetRole
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:GetRolePolicy
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:TagRole
+                Resource:
+                  - !Sub arn:aws:iam::${AccountId}:role/toolshare-*
+
+              - Sid: PassRoleToLambda
+                Effect: Allow
+                Action: iam:PassRole
+                Resource:
+                  - !Sub arn:aws:iam::${AccountId}:role/toolshare-*
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: lambda.amazonaws.com
+
+              - Sid: PassRoleToCodeDeploy
+                Effect: Allow
+                Action: iam:PassRole
+                Resource:
+                  - !Sub arn:aws:iam::${AccountId}:role/toolshare-*
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: codedeploy.amazonaws.com
+
+              - Sid: PassRoleToStates
+                Effect: Allow
+                Action: iam:PassRole
+                Resource:
+                  - !Sub arn:aws:iam::${AccountId}:role/toolshare-*
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: states.amazonaws.com
+
+              - Sid: ReadStackOutputsForSmoke
+                Effect: Allow
+                Action:
+                  - cloudformation:DescribeStacks
+                Resource: '*'
+
+Outputs:
+  RoleArn:
+    Description: Set this as the role-to-assume in the GitHub Actions workflow.
+    Value: !GetAtt GitHubActionsRole.Arn
