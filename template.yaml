@@ -186,10 +186,14 @@ Resources:
       ContentBasedDeduplication: true
       VisibilityTimeout: 30
 
-  RentalEventsTopicPolicy:
-    Type: AWS::SNS::TopicPolicy
+  # Allowing the topic to deliver into each queue is a QUEUE-side grant, so
+  # it belongs in an SQS queue policy (one statement, one queue resource) --
+  # not an SNS topic policy, which only governs actions on the topic itself
+  # and rejects a statement naming multiple non-topic resources.
+  NotifyOwnerQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
     Properties:
-      Topics: [!Ref RentalEventsTopic]
+      Queues: [!Ref NotifyOwnerQueue]
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -197,9 +201,23 @@ Resources:
             Principal:
               Service: sns.amazonaws.com
             Action: sqs:SendMessage
-            Resource:
-              - !GetAtt NotifyOwnerQueue.Arn
-              - !GetAtt AuditLogQueue.Arn
+            Resource: !GetAtt NotifyOwnerQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref RentalEventsTopic
+
+  AuditLogQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues: [!Ref AuditLogQueue]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt AuditLogQueue.Arn
             Condition:
               ArnEquals:
                 aws:SourceArn: !Ref RentalEventsTopic

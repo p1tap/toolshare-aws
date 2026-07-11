@@ -108,6 +108,9 @@ Resources:
                   - cloudfront:GetDistributionConfig
                   - cloudfront:TagResource
                   - cloudfront:UntagResource
+                  # resolving !GetAtt Function.FunctionMetadata.FunctionARN
+                  # during distribution creation reads the function's tags
+                  - cloudfront:ListTagsForResource
                   - cloudfront:CreateInvalidation
                   - cloudfront:CreateOriginAccessControl
                   - cloudfront:GetOriginAccessControl
