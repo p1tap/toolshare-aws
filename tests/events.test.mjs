@@ -10,10 +10,14 @@ vi.mock("@aws-sdk/s3-request-presigner", () => ({
 }));
 
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { mockClient } from "aws-sdk-client-mock";
+import { DynamoDBDocumentClient, GetCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { handler as notifyOwnerWorker } from "../src/handlers/notifyOwnerWorker.mjs";
 import { handler as auditLogWorker } from "../src/handlers/auditLogWorker.mjs";
 import { handler as analyticsEvent } from "../src/handlers/analyticsEvent.mjs";
 import { handler as presignUpload } from "../src/handlers/presignUpload.mjs";
+
+const ddbMock = mockClient(DynamoDBDocumentClient);
 
 const sqsEvent = (...bodies) => ({
   Records: bodies.map((b) => ({ body: typeof b === "string" ? b : JSON.stringify(b) })),
@@ -21,6 +25,7 @@ const sqsEvent = (...bodies) => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  ddbMock.reset();
 });
 
 describe("notifyOwnerWorker (SQS consumer feeding the DLQ demo)", () => {
@@ -68,22 +73,37 @@ describe("presignUpload", () => {
     expect(getSignedUrl).not.toHaveBeenCalled();
   });
 
-  it("returns a short-lived URL under the tool's own key prefix", async () => {
+  it("404s for a tool that doesn't exist", async () => {
+    ddbMock.on(GetCommand).resolves({});
+    const res = await presignUpload({ pathParameters: { toolId: "ghost" } });
+    expect(res.statusCode).toBe(404);
+    expect(getSignedUrl).not.toHaveBeenCalled();
+  });
+
+  it("returns a short-lived URL and links the key to the tool record", async () => {
+    ddbMock.on(GetCommand).resolves({ Item: { toolId: "t42" } });
+    ddbMock.on(UpdateCommand).resolves({});
     const res = await presignUpload({ pathParameters: { toolId: "t42" } });
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
     expect(body.uploadUrl).toContain("https://");
     expect(body.key).toMatch(/^tools\/t42\/[a-z0-9]+\.jpg$/);
     expect(body.expiresIn).toBe(300); // presigned URLs must stay short-lived
+    // the imageKey persisted must be exactly the key handed to the client
+    const update = ddbMock.commandCalls(UpdateCommand)[0].args[0].input;
+    expect(update.ExpressionAttributeValues[":k"]).toBe(body.key);
   });
 
   it("pins the upload content type to image/jpeg", async () => {
+    ddbMock.on(GetCommand).resolves({ Item: { toolId: "t42" } });
+    ddbMock.on(UpdateCommand).resolves({});
     await presignUpload({ pathParameters: { toolId: "t42" } });
     const command = getSignedUrl.mock.calls[0][1];
     expect(command.input.ContentType).toBe("image/jpeg");
   });
 
   it("500s (not crash) when presigning fails", async () => {
+    ddbMock.on(GetCommand).resolves({ Item: { toolId: "t42" } });
     getSignedUrl.mockRejectedValueOnce(new Error("kms down"));
     const res = await presignUpload({ pathParameters: { toolId: "t42" } });
     expect(res.statusCode).toBe(500);

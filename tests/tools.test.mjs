@@ -1,39 +1,70 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
-import { DynamoDBDocumentClient, PutCommand, GetCommand, ScanCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, PutCommand, GetCommand, ScanCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import { handler as createTool } from "../src/handlers/createTool.mjs";
 import { handler as getTool } from "../src/handlers/getTool.mjs";
 import { handler as listTools } from "../src/handlers/listTools.mjs";
+import { handler as listMyTools } from "../src/handlers/listMyTools.mjs";
 
 const ddbMock = mockClient(DynamoDBDocumentClient);
+
+// HTTP API JWT-authorizer event shape (what getIdentity reads)
+const asUser = (sub, extra = {}) => ({
+  requestContext: {
+    authorizer: { jwt: { claims: { sub, email: `${sub}@example.com` } } },
+  },
+  ...extra,
+});
 
 beforeEach(() => {
   ddbMock.reset();
 });
 
 describe("createTool", () => {
+  it("401s without an authenticated identity", async () => {
+    const res = await createTool({ body: JSON.stringify({ name: "Drill", costPerDay: 10 }) });
+    expect(res.statusCode).toBe(401);
+  });
+
   it("rejects a request missing required fields", async () => {
-    const res = await createTool({ body: JSON.stringify({ name: "Drill" }) });
+    const res = await createTool(asUser("u1", { body: JSON.stringify({ name: "Drill" }) }));
     expect(res.statusCode).toBe(400);
   });
 
   it("rejects a non-positive costPerDay", async () => {
-    const res = await createTool({
-      body: JSON.stringify({ name: "Drill", costPerDay: -5, ownerId: "u1" }),
-    });
+    const res = await createTool(
+      asUser("u1", { body: JSON.stringify({ name: "Drill", costPerDay: -5 }) })
+    );
     expect(res.statusCode).toBe(400);
   });
 
-  it("creates a tool with valid input", async () => {
+  it("creates a tool owned by the JWT subject — body ownerId is ignored", async () => {
     ddbMock.on(PutCommand).resolves({});
-    const res = await createTool({
-      body: JSON.stringify({ name: "Drill", costPerDay: 10, ownerId: "u1" }),
-    });
+    const res = await createTool(
+      asUser("u1", { body: JSON.stringify({ name: "Drill", costPerDay: 10, ownerId: "someone-else" }) })
+    );
     expect(res.statusCode).toBe(201);
     const body = JSON.parse(res.body);
-    expect(body.name).toBe("Drill");
+    expect(body.ownerId).toBe("u1"); // never the body's claim
     expect(body.status).toBe("active");
     expect(body.toolId).toBeTruthy();
+  });
+});
+
+describe("listMyTools", () => {
+  it("401s without an authenticated identity", async () => {
+    const res = await listMyTools({});
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("queries the owner-index for the JWT subject", async () => {
+    ddbMock.on(QueryCommand).resolves({ Items: [{ toolId: "t1", ownerId: "u1" }] });
+    const res = await listMyTools(asUser("u1"));
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body)).toHaveLength(1);
+    const call = ddbMock.commandCalls(QueryCommand)[0].args[0].input;
+    expect(call.IndexName).toBe("owner-index");
+    expect(call.ExpressionAttributeValues[":o"]).toBe("u1");
   });
 });
 

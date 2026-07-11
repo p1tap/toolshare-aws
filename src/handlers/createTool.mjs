@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { PutCommand } from "@aws-sdk/lib-dynamodb";
 import { ddb, TOOLS_TABLE } from "../lib/dynamo.mjs";
+import { getIdentity } from "../lib/auth.mjs";
 import { json } from "../lib/response.mjs";
 
 export const handler = async (event) => {
@@ -10,6 +11,12 @@ export const handler = async (event) => {
     return json(500, { error: "Internal error (chaos injection)" });
   }
 
+  // Owner is whoever presents the token — never trusted from the body.
+  const identity = getIdentity(event);
+  if (!identity) {
+    return json(401, { error: "Unauthorized" });
+  }
+
   let body;
   try {
     body = JSON.parse(event.body ?? "{}");
@@ -17,11 +24,9 @@ export const handler = async (event) => {
     return json(400, { error: "Invalid JSON body" });
   }
 
-  const { name, type, costPerDay, ownerId } = body;
-  if (!name || !costPerDay || !ownerId) {
-    return json(400, {
-      error: "name, costPerDay, and ownerId are required",
-    });
+  const { name, type, costPerDay } = body;
+  if (!name || !costPerDay) {
+    return json(400, { error: "name and costPerDay are required" });
   }
   if (typeof costPerDay !== "number" || costPerDay <= 0) {
     return json(400, { error: "costPerDay must be a positive number" });
@@ -32,7 +37,7 @@ export const handler = async (event) => {
     name,
     type: type ?? "general",
     costPerDay,
-    ownerId,
+    ownerId: identity.userId,
     status: "active",
     createdAt: new Date().toISOString(),
   };
