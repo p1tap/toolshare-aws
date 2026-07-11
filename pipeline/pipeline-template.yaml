@@ -218,6 +218,14 @@ Resources:
                 Resource:
                   - !Sub arn:aws:secretsmanager:ap-southeast-1:${AccountId}:secret:toolshare/*
 
+              # The secret's GenerateSecretString needs a random password,
+              # and this action doesn't support resource-level scoping.
+              - Sid: PaymentSecretRandomPassword
+                Effect: Allow
+                Action:
+                  - secretsmanager:GetRandomPassword
+                Resource: "*"
+
               - Sid: EventBridgeRules
                 Effect: Allow
                 Action:
