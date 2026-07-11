@@ -304,6 +304,9 @@ Resources:
                 Resource:
                   - arn:aws:apigateway:ap-southeast-1::/apis
                   - arn:aws:apigateway:ap-southeast-1::/apis/*
+                  # creating/updating the HTTP API tags it, which is a POST
+                  # against the /tags/{resourceArn} path, not /apis
+                  - arn:aws:apigateway:ap-southeast-1::/tags/*
 
               - Sid: CodeDeployCanary
                 Effect: Allow
