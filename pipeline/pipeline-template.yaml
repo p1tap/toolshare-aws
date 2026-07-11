@@ -499,7 +499,9 @@ Resources:
       Source:
         Type: CODEPIPELINE
         BuildSpec: pipeline/buildspec-deploy.yml
-      TimeoutInMinutes: 15
+      # First-time CloudFront creation dominates the deploy; keep enough room
+      # for SAM plus the web build/sync without weakening any release gate.
+      TimeoutInMinutes: 30
 
   SmokeTestProject:
     Type: AWS::CodeBuild::Project

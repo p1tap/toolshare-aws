@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
-  Lists every commonly-billable resource across ap-southeast-1 and
-  ap-southeast-7, plus yesterday's Cost Explorer total.
+  Lists every commonly-billable resource in ToolShare's ap-southeast-1
+  region, plus yesterday's Cost Explorer total.
 
 .DESCRIPTION
   Cost-discipline check to run at the end of any working session:
@@ -17,8 +17,12 @@ param(
 )
 
 $env:AWS_PROFILE = $Profile
+$ErrorActionPreference = 'Stop'
+if ($PSVersionTable.PSVersion.Major -ge 7) {
+    $PSNativeCommandUseErrorActionPreference = $true
+}
 
-$Regions = @('ap-southeast-1', 'ap-southeast-7')
+$Regions = @('ap-southeast-1')
 
 foreach ($Region in $Regions) {
     Write-Host "=== $Region ===" -ForegroundColor Cyan
@@ -67,7 +71,7 @@ Write-Host "=== Cost Explorer: yesterday's total ===" -ForegroundColor Cyan
 $yesterday = (Get-Date).AddDays(-1).ToString('yyyy-MM-dd')
 $today = (Get-Date).ToString('yyyy-MM-dd')
 aws ce get-cost-and-usage `
-    --time-period Start=$yesterday,End=$today `
+    --time-period "Start=$yesterday,End=$today" `
     --granularity DAILY `
     --metrics UnblendedCost `
     --query 'ResultsByTime[0].Total.UnblendedCost' `

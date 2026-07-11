@@ -19,5 +19,6 @@ async function check(path, expectStatus) {
 
 await check("/health", 200);
 await check("/tools", 200);
+await check("/tools/mine", 401);
 
 console.log("Smoke test passed.");

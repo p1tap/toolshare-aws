@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
 import { mockClient } from "aws-sdk-client-mock";
 import { DynamoDBDocumentClient, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { GetSecretValueCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
@@ -66,5 +67,12 @@ describe("compensateReservation", () => {
     expect(result.status).toBe("payment_failed");
     const call = ddbMock.commandCalls(UpdateCommand)[0].args[0].input;
     expect(call.Key.rentalId).toBe("r2");
+  });
+});
+
+describe("checkout infrastructure contract", () => {
+  it("grants the synchronous Express execution action used by startCheckout", () => {
+    const template = readFileSync(new URL("../template.yaml", import.meta.url), "utf8");
+    expect(template).toContain("states:StartSyncExecution");
   });
 });

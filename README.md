@@ -122,7 +122,7 @@ seeded marketplace, simulated auth, and a checkout whose first payment
 attempt deliberately fails so the saga's compensation path is always
 demonstrable. Details in [`web/README.md`](web/README.md).
 
-Live URL: _added after first deploy_ (`WebUrl` stack output).
+Live URL: **https://d3sphfxaivnxo6.cloudfront.net**
 
 ## Data model
 
@@ -175,7 +175,8 @@ nothing runs hourly at rest:
 - Lambda, API Gateway (HTTP API), DynamoDB on-demand, S3, SQS, SNS,
   Step Functions Express, EventBridge: **$0 idle**, pennies per
   invocation/execution when exercised
-- Secrets Manager: ~$0.40/month per secret (one secret)
+- Secrets Manager: two small stage-specific secrets (the only fixed monthly
+  storage charge in the application stacks)
 - CodePipeline and CodeBuild: usage-based release cost; nothing runs at rest
 
 No NAT Gateway, ALB, RDS, or always-on EC2 instances anywhere in this
