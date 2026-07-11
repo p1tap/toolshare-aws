@@ -237,6 +237,7 @@ Resources:
                   - events:DescribeRule
                   - events:PutTargets
                   - events:RemoveTargets
+                  - events:TagResource
                 Resource:
                   - !Sub arn:aws:events:ap-southeast-1:${AccountId}:rule/toolshare-*
 
@@ -263,11 +264,28 @@ Resources:
                 Action:
                   - logs:CreateLogGroup
                   - logs:DeleteLogGroup
-                  - logs:DescribeLogGroups
                   - logs:PutRetentionPolicy
                 Resource:
                   - !Sub arn:aws:logs:ap-southeast-1:${AccountId}:log-group:/aws/vendedlogs/states/toolshare-*
                   - !Sub arn:aws:logs:ap-southeast-1:${AccountId}:log-group:/aws/vendedlogs/states/toolshare-*:*
+
+              # CloudWatch Logs actions that don't support resource-level
+              # scoping: DescribeLogGroups resolves the log group's Arn GetAtt,
+              # and the log-delivery / resource-policy actions wire up Step
+              # Functions vended logging. IAM rejects an ARN here, so "*".
+              - Sid: LogsAccountLevel
+                Effect: Allow
+                Action:
+                  - logs:DescribeLogGroups
+                  - logs:DescribeResourcePolicies
+                  - logs:PutResourcePolicy
+                  - logs:DeleteResourcePolicy
+                  - logs:CreateLogDelivery
+                  - logs:GetLogDelivery
+                  - logs:UpdateLogDelivery
+                  - logs:DeleteLogDelivery
+                  - logs:ListLogDeliveries
+                Resource: "*"
 
               - Sid: CloudFormationApp
                 Effect: Allow
