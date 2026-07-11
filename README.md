@@ -91,10 +91,14 @@ mock mode on every push (independent of the deploy jobs, since it needs
 no AWS) — signup → verify → list a tool → rent → checkout-fail →
 compensate → retry → return. See [`web/README.md`](web/README.md#browser-e2e-playwright).
 
-Runner: **GitHub Actions**, authenticated to AWS via **OIDC role
-assumption** (`aws-actions/configure-aws-credentials`) — no long-lived
-AWS keys stored in GitHub. The manual approval gate is a GitHub
-`production` environment with a required reviewer.
+Release runner: **AWS CodePipeline V2 + CodeBuild**, sourced from GitHub
+through an authorized CodeConnection. CodeBuild deploys through a scoped
+service role; no AWS keys are stored in GitHub. The production gate is a
+native CodePipeline manual-approval action.
+
+GitHub Actions remains CI-only: it publishes visible repository checks for
+the backend/frontend build, unit tests, template lint, and mock-mode browser
+journey. It never deploys, so there is one canonical release pipeline.
 
 Every deploy uses `sam deploy`, which drives **CodeDeploy canary
 releases** on the `createTool` Lambda (`Linear10PercentEvery1Minute`)
@@ -102,26 +106,7 @@ with a CloudWatch alarm on function errors — if the new version starts
 throwing during the 10%-traffic window, CodeDeploy automatically rolls
 back before the rest of the traffic shifts. This is independent of
 whatever runs the pipeline, so it works the same whether `sam deploy`
-is invoked by GitHub Actions or a human at a terminal.
-
-### Why GitHub Actions, not CodePipeline
-
-The pipeline was originally built on **CodePipeline V2 + CodeBuild**
-(`pipeline/pipeline-template.yaml` — still in this repo as reference).
-It hit an account-level CodeBuild quota of **0 concurrent builds** —
-not a visible Service Quotas value, but a separate new-account
-fraud-prevention gate. AWS Support was engaged and ultimately
-**declined** to raise it: *"quotas are evaluated based on account
-history, usage patterns, and other factors."*
-
-Rather than block the project on an account-level decision outside my
-control, I moved the CI runner to GitHub Actions, which needed no
-quota and no CodeBuild at all. Everything downstream of "run the
-pipeline steps" — `sam build`, `sam deploy`, the smoke gate script, the
-canary/rollback mechanics — was already runner-agnostic, so the switch
-touched only the pipeline's front door
-(`.github/workflows/pipeline.yml` + `pipeline/github-oidc.yaml`), not
-the application or its deployment strategy.
+is invoked by CodeBuild or a human at a terminal.
 
 ## Web app
 
@@ -154,16 +139,18 @@ concept.
 | List rentals by renter | `rentals` | GSI `renter-index` (PK `renterId`) |
 | List rentals by tool | `rentals` | GSI `tool-index` (PK `toolId`) |
 
-Rental `status` (`requested → active → returned` / `failed`) drives the
-Step Functions saga; payment info lives as attributes on the rental
-record itself (mock gateway, no separate payments table).
+Rental `status` (`requested → reserved → active → returned`, with failed
+payment compensated back to `requested`) drives the Step Functions saga;
+payment info lives as attributes on the rental record itself (mock gateway,
+no separate payments table).
 
 ## Identity
 
-Cognito **is** the user store — no separate users table, no
-hand-rolled password hashing. Roles are Cognito groups (`customer`,
-`renter`, `admin`) carried in the JWT and verified server-side in each
-Lambda — the client is never trusted with role decisions.
+Cognito **is** the user store — no separate users table, no hand-rolled
+password hashing. API Gateway validates the JWT, and Lambdas derive ownership
+from its `sub` claim rather than trusting request bodies. Any verified user
+can list and rent tools; the `admin` group is recognized only for the
+return-rental override.
 
 ## Module coverage (AWS Academy Cloud Developing, by feature)
 
@@ -175,12 +162,10 @@ Lambda — the client is never trusted with role decisions.
 | M5 NoSQL | DynamoDB on-demand + GSI |
 | M6 REST APIs | HTTP API Gateway + Lambda |
 | M7 Event-driven | S3 event thumbnailer + EventBridge custom events |
-| M8 Containers | (planned) Fargate analytics service |
-| M9 Caching | (planned) ElastiCache cache-aside |
 | M10 Messaging | SNS FIFO fanout → SQS FIFO + DLQ |
 | M11 Workflows | Step Functions saga with compensation |
 | M12 Secure apps | Cognito + JWT authorizer + Secrets Manager |
-| M13 CI/CD | GitHub Actions (OIDC) → staging → smoke gate → approval → prod → smoke gate, with CodeDeploy canary + alarm-triggered auto-rollback |
+| M13 CI/CD | CodePipeline/CodeBuild → staging → smoke gate → approval → prod → smoke gate, with CodeDeploy canary + alarm-triggered auto-rollback |
 
 ## Cost
 
@@ -191,7 +176,7 @@ nothing runs hourly at rest:
   Step Functions Express, EventBridge: **$0 idle**, pennies per
   invocation/execution when exercised
 - Secrets Manager: ~$0.40/month per secret (one secret)
-- GitHub Actions: free for public repositories
+- CodePipeline and CodeBuild: usage-based release cost; nothing runs at rest
 
 No NAT Gateway, ALB, RDS, or always-on EC2 instances anywhere in this
 stack.
@@ -210,12 +195,8 @@ API_URL=<stack ApiUrl output> npm run smoke
 - `template.yaml` — the application (API, Lambdas, DynamoDB, S3,
   Cognito, SNS/SQS, Step Functions, Secrets Manager, CloudFront web tier)
 - `web/` — the React/TypeScript web app (see `web/README.md`)
-- `pipeline/pipeline-template.yaml` — original CodePipeline/CodeBuild
-  stack (kept as reference; account-level CodeBuild quota denial
-  described above)
-- `pipeline/github-oidc.yaml` — OIDC provider + deploy role assumed by
-  GitHub Actions
-- `.github/workflows/pipeline.yml` — the CI/CD pipeline
+- `pipeline/pipeline-template.yaml` — CodePipeline/CodeBuild release stack
+- `.github/workflows/ci.yml` — CI-only public repository checks
 - `src/handlers/` — Lambda functions; `src/lib/` — shared auth/db/response
   helpers
 - `statemachine/checkout.asl.json` — the checkout saga definition

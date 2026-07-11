@@ -13,4 +13,4 @@ phases:
     commands:
       - npm test
       - cd web && npm run build && npm test && cd ..
-      - cfn-lint template.yaml pipeline/github-oidc.yaml pipeline/pipeline-template.yaml
+      - cfn-lint template.yaml pipeline/pipeline-template.yaml

@@ -46,10 +46,9 @@ npm run test:e2e
 mock-mode journey in one session: sign up → verify → list a tool → rent
 someone else's → checkout (the mock guarantees the first attempt fails,
 so the compensation banner is always exercised) → retry → return. It runs
-against `npm run dev`'s mock mode, so it needs no AWS and is safe to run
-during the account freeze; CI runs it on every push (`e2e` job in
-`pipeline.yml`). The same journey is the manual runbook for the first
-real-stage smoke test after Phase D deploys.
+against `npm run dev`'s mock mode, so it needs no AWS. CI runs it on every
+push, and CodePipeline repeats it as a release gate. The same journey is the
+manual runbook for a real-stage verification.
 
 ## Screenshots
 

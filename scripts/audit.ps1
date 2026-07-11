@@ -7,7 +7,16 @@
   Cost-discipline check to run at the end of any working session:
   confirms nothing hourly-billed (EC2, Fargate, ElastiCache, NAT
   Gateway, unattached EBS/EIP) is quietly running.
+
+.PARAMETER Profile
+  AWS CLI profile for the account that hosts ToolShare.
 #>
+
+param(
+    [string]$Profile = 'toolshare2'
+)
+
+$env:AWS_PROFILE = $Profile
 
 $Regions = @('ap-southeast-1', 'ap-southeast-7')
 

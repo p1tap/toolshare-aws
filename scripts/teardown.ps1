@@ -9,8 +9,11 @@
 
 .PARAMETER Stacks
   Which stacks to tear down. Defaults to staging + prod only, since the
-  pipeline/github-oidc/artifact-bucket stacks are meant to stay up
+  pipeline and artifact buckets are meant to stay up
   ($0 idle) between demo sessions. Pass -Stacks All to remove everything.
+
+.PARAMETER Profile
+  AWS CLI profile for the account that hosts ToolShare.
 
 .PARAMETER WhatIf
   Preview only; makes no changes.
@@ -20,13 +23,16 @@ param(
   [ValidateSet('AppOnly', 'All')]
   [string]$Stacks = 'AppOnly',
 
+  [string]$Profile = 'toolshare2',
+
   [switch]$WhatIf
 )
 
 $Region = 'ap-southeast-1'
+$env:AWS_PROFILE = $Profile
 
 $appStacks = @('toolshare-staging', 'toolshare-prod')
-$infraStacks = @('toolshare-github-oidc', 'toolshare-pipeline')
+$infraStacks = @('toolshare-pipeline')
 
 $targets = if ($Stacks -eq 'All') { $appStacks + $infraStacks } else { $appStacks }
 
@@ -53,7 +59,7 @@ foreach ($stack in $targets) {
 
 if ($Stacks -eq 'AppOnly') {
     Write-Host ""
-    Write-Host "Note: pipeline/github-oidc/artifact-bucket stacks were left running (idle, `$0 cost)."
+    Write-Host "Note: the pipeline and artifact buckets were left running (idle, `$0 cost)."
     Write-Host "Pass -Stacks All to remove those too."
 }
 
