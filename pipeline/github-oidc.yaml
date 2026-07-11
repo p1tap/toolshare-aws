@@ -76,8 +76,8 @@ Resources:
                   - s3:DeleteObject
                   - s3:PutLifecycleConfiguration
                 Resource:
-                  - !Sub arn:aws:s3:::toolshare-images-*
-                  - !Sub arn:aws:s3:::toolshare-images-*/*
+                  - arn:aws:s3:::toolshare-images-*
+                  - arn:aws:s3:::toolshare-images-*/*
 
               - Sid: Messaging
                 Effect: Allow
@@ -238,8 +238,8 @@ Resources:
                   - apigateway:DELETE
                   - apigateway:PATCH
                 Resource:
-                  - !Sub arn:aws:apigateway:ap-southeast-1::/apis
-                  - !Sub arn:aws:apigateway:ap-southeast-1::/apis/*
+                  - arn:aws:apigateway:ap-southeast-1::/apis
+                  - arn:aws:apigateway:ap-southeast-1::/apis/*
 
               - Sid: CodeDeployCanary
                 Effect: Allow

@@ -38,6 +38,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      # Lint every CloudFormation/SAM template before anything deploys —
+      # a template error caught here costs seconds, not a failed stack.
+      - run: pipx run cfn-lint template.yaml pipeline/github-oidc.yaml pipeline/pipeline-template.yaml
 
   deploy-staging:
     needs: test
