@@ -594,8 +594,13 @@ Resources:
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref RentalsTable
-        - StepFunctionsExecutionPolicy:
-            StateMachineName: !GetAtt CheckoutStateMachine.Name
+        # StartSyncExecution is a separate IAM action and is not included in
+        # SAM's StepFunctionsExecutionPolicy (which grants StartExecution).
+        - Statement:
+            - Sid: StartSynchronousCheckout
+              Effect: Allow
+              Action: states:StartSyncExecution
+              Resource: !Ref CheckoutStateMachine
       Events:
         Api:
           Type: HttpApi
