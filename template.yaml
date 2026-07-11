@@ -559,6 +559,21 @@ Resources:
             FunctionName: !Ref ConfirmRentalFunction
         - LambdaInvokePolicy:
             FunctionName: !Ref CompensateReservationFunction
+        # Step Functions logging to CloudWatch Logs needs the state
+        # machine's own role to hold these vended-logs delivery actions;
+        # none of them support resource-level scoping, so Resource is "*".
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogDelivery
+                - logs:GetLogDelivery
+                - logs:UpdateLogDelivery
+                - logs:DeleteLogDelivery
+                - logs:ListLogDeliveries
+                - logs:PutResourcePolicy
+                - logs:DescribeResourcePolicies
+                - logs:DescribeLogGroups
+              Resource: "*"
       Logging:
         Level: ERROR
         IncludeExecutionData: false
