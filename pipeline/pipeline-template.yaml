@@ -277,6 +277,16 @@ Resources:
                   - !Sub arn:aws:cloudformation:ap-southeast-1:${AccountId}:stack/toolshare-staging/*
                   - !Sub arn:aws:cloudformation:ap-southeast-1:${AccountId}:stack/toolshare-prod/*
 
+              # SAM's Transform: AWS::Serverless-2016-10-31 expands into a
+              # nested changeset against this AWS-owned macro resource,
+              # separate from (and in addition to) the app stack ARNs above.
+              - Sid: SamTransform
+                Effect: Allow
+                Action:
+                  - cloudformation:CreateChangeSet
+                Resource:
+                  - arn:aws:cloudformation:ap-southeast-1:aws:transform/Serverless-2016-10-31
+
               - Sid: Lambda
                 Effect: Allow
                 Action:
