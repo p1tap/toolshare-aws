@@ -32,8 +32,8 @@ export const handler = async (event) => {
     if (!allowed) {
       return json(403, { error: "Not your rental" });
     }
-    if (rental.status === "returned") {
-      return json(409, { error: "Rental already returned" });
+    if (rental.status !== "active") {
+      return json(409, { error: `Cannot return a rental in status "${rental.status}"` });
     }
 
     const updated = await ddb.send(
@@ -41,10 +41,11 @@ export const handler = async (event) => {
         TableName: RENTALS_TABLE,
         Key: { rentalId },
         UpdateExpression: "SET #s = :returned, returnedAt = :now",
-        ConditionExpression: "#s <> :returned",
+        ConditionExpression: "#s = :active",
         ExpressionAttributeNames: { "#s": "status" },
         ExpressionAttributeValues: {
           ":returned": "returned",
+          ":active": "active",
           ":now": new Date().toISOString(),
         },
         ReturnValues: "ALL_NEW",
@@ -53,7 +54,7 @@ export const handler = async (event) => {
     return json(200, updated.Attributes);
   } catch (err) {
     if (err.name === "ConditionalCheckFailedException") {
-      return json(409, { error: "Rental already returned" });
+      return json(409, { error: "Rental is no longer active" });
     }
     console.error("returnRental failed:", err);
     return json(500, { error: "Failed to return rental" });

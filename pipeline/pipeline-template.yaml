@@ -56,6 +56,12 @@ Resources:
 
   CodeBuildServiceRole:
     Type: AWS::IAM::Role
+    # cfn-lint 1.53's IAM catalog still validates API Gateway V1 actions
+    # here and does not know the V2 TagResource/UntagResource actions.
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks: [W3037]
     Properties:
       RoleName: toolshare-codebuild-role
       AssumeRolePolicyDocument:
@@ -104,7 +110,9 @@ Resources:
                 Effect: Allow
                 Action:
                   - s3:CreateBucket
+                  - s3:DeleteBucket
                   - s3:PutBucketPolicy
+                  - s3:DeleteBucketPolicy
                   - s3:PutBucketPublicAccessBlock
                   - s3:PutBucketCORS
                   - s3:PutBucketNotification
@@ -122,7 +130,9 @@ Resources:
                 Effect: Allow
                 Action:
                   - s3:CreateBucket
+                  - s3:DeleteBucket
                   - s3:PutBucketPolicy
+                  - s3:DeleteBucketPolicy
                   - s3:GetBucketPolicy
                   - s3:PutBucketPublicAccessBlock
                   - s3:ListBucket
@@ -170,6 +180,7 @@ Resources:
                   - sns:CreateTopic
                   - sns:DeleteTopic
                   - sns:GetTopicAttributes
+                  - sns:GetSubscriptionAttributes
                   - sns:SetTopicAttributes
                   - sns:Subscribe
                   - sns:Unsubscribe
@@ -205,6 +216,7 @@ Resources:
                   - states:DeleteStateMachine
                   - states:UpdateStateMachine
                   - states:DescribeStateMachine
+                  - states:ListTagsForResource
                   - states:TagResource
                 Resource:
                   - !Sub arn:aws:states:ap-southeast-1:${AccountId}:stateMachine:toolshare-*
@@ -235,6 +247,8 @@ Resources:
                   - events:PutRule
                   - events:DeleteRule
                   - events:DescribeRule
+                  - events:ListTargetsByRule
+                  - events:ListTagsForResource
                   - events:PutTargets
                   - events:RemoveTargets
                   - events:TagResource
@@ -277,6 +291,7 @@ Resources:
                 Effect: Allow
                 Action:
                   - logs:DescribeLogGroups
+                  - logs:DescribeIndexPolicies
                   - logs:DescribeResourcePolicies
                   - logs:PutResourcePolicy
                   - logs:DeleteResourcePolicy
@@ -324,6 +339,11 @@ Resources:
                   - lambda:UpdateFunctionConfiguration
                   - lambda:GetFunction
                   - lambda:GetFunctionConfiguration
+                  - lambda:GetFunctionCodeSigningConfig
+                  - lambda:GetRuntimeManagementConfig
+                  - lambda:GetProvisionedConcurrencyConfig
+                  - lambda:GetPolicy
+                  - lambda:ListTags
                   - lambda:DeleteFunction
                   - lambda:AddPermission
                   - lambda:RemovePermission
@@ -331,6 +351,7 @@ Resources:
                   - lambda:PublishVersion
                   - lambda:CreateAlias
                   - lambda:UpdateAlias
+                  - lambda:DeleteAlias
                   - lambda:GetAlias
                   - lambda:ListVersionsByFunction
                 Resource:
@@ -358,6 +379,8 @@ Resources:
                   - apigateway:PUT
                   - apigateway:DELETE
                   - apigateway:PATCH
+                  - apigateway:TagResource
+                  - apigateway:UntagResource
                 Resource:
                   - arn:aws:apigateway:ap-southeast-1::/apis
                   - arn:aws:apigateway:ap-southeast-1::/apis/*

@@ -19,6 +19,15 @@ import { handler as presignUpload } from "../src/handlers/presignUpload.mjs";
 
 const ddbMock = mockClient(DynamoDBDocumentClient);
 
+function authedEvent(userId, extras = {}) {
+  return {
+    requestContext: {
+      authorizer: { jwt: { claims: { sub: userId, email: `${userId}@x.com` } } },
+    },
+    ...extras,
+  };
+}
+
 const sqsEvent = (...bodies) => ({
   Records: bodies.map((b) => ({ body: typeof b === "string" ? b : JSON.stringify(b) })),
 });
@@ -67,23 +76,42 @@ describe("analyticsEvent (EventBridge consumer)", () => {
 });
 
 describe("presignUpload", () => {
+  it("rejects unauthenticated requests", async () => {
+    const res = await presignUpload({ pathParameters: { toolId: "t42" } });
+    expect(res.statusCode).toBe(401);
+    expect(getSignedUrl).not.toHaveBeenCalled();
+  });
+
   it("400s without a toolId", async () => {
-    const res = await presignUpload({ pathParameters: {} });
+    const res = await presignUpload(authedEvent("owner-1", { pathParameters: {} }));
     expect(res.statusCode).toBe(400);
     expect(getSignedUrl).not.toHaveBeenCalled();
   });
 
   it("404s for a tool that doesn't exist", async () => {
     ddbMock.on(GetCommand).resolves({});
-    const res = await presignUpload({ pathParameters: { toolId: "ghost" } });
+    const res = await presignUpload(
+      authedEvent("owner-1", { pathParameters: { toolId: "ghost" } })
+    );
     expect(res.statusCode).toBe(404);
     expect(getSignedUrl).not.toHaveBeenCalled();
   });
 
+  it("403s when the caller does not own the tool", async () => {
+    ddbMock.on(GetCommand).resolves({ Item: { toolId: "t42", ownerId: "owner-1" } });
+    const res = await presignUpload(
+      authedEvent("other-user", { pathParameters: { toolId: "t42" } })
+    );
+    expect(res.statusCode).toBe(403);
+    expect(getSignedUrl).not.toHaveBeenCalled();
+  });
+
   it("returns a short-lived URL and links the key to the tool record", async () => {
-    ddbMock.on(GetCommand).resolves({ Item: { toolId: "t42" } });
+    ddbMock.on(GetCommand).resolves({ Item: { toolId: "t42", ownerId: "owner-1" } });
     ddbMock.on(UpdateCommand).resolves({});
-    const res = await presignUpload({ pathParameters: { toolId: "t42" } });
+    const res = await presignUpload(
+      authedEvent("owner-1", { pathParameters: { toolId: "t42" } })
+    );
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
     expect(body.uploadUrl).toContain("https://");
@@ -92,20 +120,23 @@ describe("presignUpload", () => {
     // the imageKey persisted must be exactly the key handed to the client
     const update = ddbMock.commandCalls(UpdateCommand)[0].args[0].input;
     expect(update.ExpressionAttributeValues[":k"]).toBe(body.key);
+    expect(update.ExpressionAttributeValues[":owner"]).toBe("owner-1");
   });
 
   it("pins the upload content type to image/jpeg", async () => {
-    ddbMock.on(GetCommand).resolves({ Item: { toolId: "t42" } });
+    ddbMock.on(GetCommand).resolves({ Item: { toolId: "t42", ownerId: "owner-1" } });
     ddbMock.on(UpdateCommand).resolves({});
-    await presignUpload({ pathParameters: { toolId: "t42" } });
+    await presignUpload(authedEvent("owner-1", { pathParameters: { toolId: "t42" } }));
     const command = getSignedUrl.mock.calls[0][1];
     expect(command.input.ContentType).toBe("image/jpeg");
   });
 
   it("500s (not crash) when presigning fails", async () => {
-    ddbMock.on(GetCommand).resolves({ Item: { toolId: "t42" } });
+    ddbMock.on(GetCommand).resolves({ Item: { toolId: "t42", ownerId: "owner-1" } });
     getSignedUrl.mockRejectedValueOnce(new Error("kms down"));
-    const res = await presignUpload({ pathParameters: { toolId: "t42" } });
+    const res = await presignUpload(
+      authedEvent("owner-1", { pathParameters: { toolId: "t42" } })
+    );
     expect(res.statusCode).toBe(500);
   });
 });

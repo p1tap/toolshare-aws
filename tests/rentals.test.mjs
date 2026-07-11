@@ -131,4 +131,15 @@ describe("returnRental", () => {
     );
     expect(res.statusCode).toBe(409);
   });
+
+  it("409s instead of skipping requested straight to returned", async () => {
+    ddbMock.on(GetCommand).resolves({
+      Item: { rentalId: "r1", renterId: "a", ownerId: "b", status: "requested" },
+    });
+    const res = await returnRental(
+      authedEvent("a", { pathParameters: { rentalId: "r1" } })
+    );
+    expect(res.statusCode).toBe(409);
+    expect(ddbMock.commandCalls(UpdateCommand)).toHaveLength(0);
+  });
 });
