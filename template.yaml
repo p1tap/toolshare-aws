@@ -636,6 +636,130 @@ Resources:
             Path: /health
             Method: GET
 
+  # ---- Web tier: private S3 + CloudFront (OAC), $0 idle -------------------
+
+  WebBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub toolshare-web-${Stage}-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  WebOac:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub toolshare-web-oac-${Stage}
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  ImagesOac:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub toolshare-images-oac-${Stage}
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # Viewer-request function on the images behavior: the site links
+  # /images/tools/<toolId>/<file>.jpg, the bucket stores tools/<toolId>/...
+  # — strip the /images prefix instead of moving objects.
+  ImagesPrefixStripFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub toolshare-images-prefix-strip-${Stage}
+      AutoPublish: true
+      FunctionConfig:
+        Comment: strip /images prefix before hitting the images bucket
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        function handler(event) {
+          var request = event.request;
+          request.uri = request.uri.replace(/^\/images/, "");
+          return request;
+        }
+
+  WebDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub ToolShare web + tool images (${Stage})
+        DefaultRootObject: index.html
+        HttpVersion: http2
+        PriceClass: PriceClass_200 # includes Asia edges
+        Origins:
+          - Id: web
+            DomainName: !GetAtt WebBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt WebOac.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+          - Id: images
+            DomainName: !GetAtt ToolImagesBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt ImagesOac.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+        DefaultCacheBehavior:
+          TargetOriginId: web
+          ViewerProtocolPolicy: redirect-to-https
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # managed CachingOptimized
+        CacheBehaviors:
+          - PathPattern: images/*
+            TargetOriginId: images
+            ViewerProtocolPolicy: redirect-to-https
+            Compress: true
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt ImagesPrefixStripFunction.FunctionMetadata.FunctionARN
+        # SPA rewrite: OAC'd S3 answers 403 for missing keys; send the app
+        # shell so client routing owns the URL space. Distribution-wide, so
+        # a missing image also yields index.html — accepted for a demo
+        # (renders as a broken thumbnail, never a broken page).
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+
+  WebBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: s3:GetObject
+            Resource: !Sub ${WebBucket.Arn}/*
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${WebDistribution}
+
+  ToolImagesBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ToolImagesBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: s3:GetObject
+            Resource: !Sub ${ToolImagesBucket.Arn}/*
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${WebDistribution}
+
 Outputs:
   ApiUrl:
     Description: HTTP API base URL
@@ -656,3 +780,10 @@ Outputs:
     Value: !Ref CheckoutStateMachine
   NotifyOwnerDlqUrl:
     Value: !Ref NotifyOwnerDlq
+  WebBucketName:
+    Value: !Ref WebBucket
+  WebDistributionId:
+    Value: !Ref WebDistribution
+  WebUrl:
+    Description: Web app URL (CloudFront)
+    Value: !Sub https://${WebDistribution.DomainName}
