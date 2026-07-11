@@ -22,15 +22,6 @@ Parameters:
       Step Functions saga-compensation demo. Leave at 0 for normal
       operation.
     Default: '0'
-  WebOrigin:
-    Type: String
-    Description: >
-      Origin of the deployed web app for API CORS (the CloudFront URL,
-      e.g. https://d123.cloudfront.net). Unknown before the first deploy,
-      so it defaults to the Vite dev server; set the real value in
-      samconfig.toml once the distribution exists.
-    Default: http://localhost:5173
-
 Globals:
   Function:
     Runtime: nodejs24.x
@@ -258,7 +249,10 @@ Resources:
       # Browser clients: the deployed web origin + the Vite dev server.
       CorsConfiguration:
         AllowOrigins:
-          - !Ref WebOrigin
+          # Resolve the distribution created by this stack directly. This
+          # avoids a first-deploy bootstrap parameter and guarantees that the
+          # deployed SPA's actual origin is allowed.
+          - !Sub https://${WebDistribution.DomainName}
           - http://localhost:5173
         AllowHeaders: [authorization, content-type]
         AllowMethods: [GET, POST, OPTIONS]
