@@ -14,3 +14,21 @@ phases:
       - test -n "$STAGE"
       - sam build
       - sam deploy --config-env "$STAGE" --no-confirm-changeset --no-fail-on-empty-changeset
+      # Web tier: VITE_ vars are baked at build time, so build per stage from
+      # the live stack outputs, then atomic sync + edge invalidation.
+      - >
+        outputs=$(aws cloudformation describe-stacks
+        --stack-name "toolshare-$STAGE" --region ap-southeast-1
+        --query "Stacks[0].Outputs" --output json)
+      - 'get() { echo "$outputs" | jq -r ".[] | select(.OutputKey==\"$1\") | .OutputValue"; }'
+      - cd web
+      - npm ci
+      - >
+        VITE_API_MODE=real
+        VITE_API_URL="$(get ApiUrl)"
+        VITE_USER_POOL_ID="$(get UserPoolId)"
+        VITE_CLIENT_ID="$(get UserPoolClientId)"
+        VITE_AWS_REGION=ap-southeast-1
+        npm run build
+      - aws s3 sync dist "s3://$(get WebBucketName)" --delete
+      - aws cloudfront create-invalidation --distribution-id "$(get WebDistributionId)" --paths "/*"

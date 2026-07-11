@@ -17,7 +17,7 @@ Parameters:
     Default: main
   AccountId:
     Type: String
-    Default: '115568633446'
+    Default: '361769555517'
 
 Resources:
   # --- Buckets -------------------------------------------------------------
@@ -117,6 +117,49 @@ Resources:
                 Resource:
                   - arn:aws:s3:::toolshare-images-*
                   - arn:aws:s3:::toolshare-images-*/*
+
+              - Sid: WebDeploy
+                Effect: Allow
+                Action:
+                  - s3:CreateBucket
+                  - s3:PutBucketPolicy
+                  - s3:GetBucketPolicy
+                  - s3:PutBucketPublicAccessBlock
+                  - s3:ListBucket
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource:
+                  - arn:aws:s3:::toolshare-web-*
+                  - arn:aws:s3:::toolshare-web-*/*
+
+              - Sid: WebCloudFront
+                Effect: Allow
+                Action:
+                  # distribution lifecycle is managed via CloudFormation; the
+                  # pipeline itself only invalidates. CloudFront ARNs don't
+                  # support name-prefix scoping usefully, hence the account
+                  # wildcard on our own distributions.
+                  - cloudfront:CreateDistribution
+                  - cloudfront:UpdateDistribution
+                  - cloudfront:DeleteDistribution
+                  - cloudfront:GetDistribution
+                  - cloudfront:GetDistributionConfig
+                  - cloudfront:TagResource
+                  - cloudfront:UntagResource
+                  - cloudfront:CreateInvalidation
+                  - cloudfront:CreateOriginAccessControl
+                  - cloudfront:GetOriginAccessControl
+                  - cloudfront:GetOriginAccessControlConfig
+                  - cloudfront:UpdateOriginAccessControl
+                  - cloudfront:DeleteOriginAccessControl
+                  - cloudfront:CreateFunction
+                  - cloudfront:UpdateFunction
+                  - cloudfront:DeleteFunction
+                  - cloudfront:DescribeFunction
+                  - cloudfront:GetFunction
+                  - cloudfront:PublishFunction
+                Resource: "*"
 
               - Sid: Messaging
                 Effect: Allow
@@ -409,6 +452,22 @@ Resources:
         BuildSpec: pipeline/buildspec-smoke.yml
       TimeoutInMinutes: 10
 
+  E2eProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: toolshare-e2e
+      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: pipeline/buildspec-e2e.yml
+      TimeoutInMinutes: 15
+
   # --- CodePipeline service role --------------------------------------------
 
   PipelineServiceRole:
@@ -449,6 +508,7 @@ Resources:
                   - !GetAtt TestProject.Arn
                   - !GetAtt DeployProject.Arn
                   - !GetAtt SmokeTestProject.Arn
+                  - !GetAtt E2eProject.Arn
 
   # --- Pipeline --------------------------------------------------------------
 
@@ -489,6 +549,18 @@ Resources:
                 - Name: SourceOutput
               Configuration:
                 ProjectName: !Ref TestProject
+              RunOrder: 1
+            - Name: RunBrowserE2E
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              InputArtifacts:
+                - Name: SourceOutput
+              Configuration:
+                ProjectName: !Ref E2eProject
+              RunOrder: 1
 
         - Name: DeployStaging
           Actions:

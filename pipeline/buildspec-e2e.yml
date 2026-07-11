@@ -1,0 +1,16 @@
+version: 0.2
+
+# Browser E2E runs entirely against the web app's mock mode — no AWS
+# involved, so it's safe to run in parallel with the unit-test action.
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 20
+    commands:
+      - cd web
+      - npm ci
+      - npx playwright install --with-deps chromium
+  build:
+    commands:
+      - npm run test:e2e

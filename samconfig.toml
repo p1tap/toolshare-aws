@@ -4,7 +4,7 @@ version = 0.1
 region = "ap-southeast-1"
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = false
-s3_bucket = "toolshare-sam-artifacts-115568633446"
+s3_bucket = "toolshare-sam-artifacts-361769555517"
 s3_prefix = "toolshare"
 
 [staging.deploy.parameters]
@@ -13,7 +13,7 @@ parameter_overrides = "Stage=staging"
 region = "ap-southeast-1"
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = false
-s3_bucket = "toolshare-sam-artifacts-115568633446"
+s3_bucket = "toolshare-sam-artifacts-361769555517"
 s3_prefix = "toolshare"
 
 [prod.deploy.parameters]
@@ -22,5 +22,5 @@ parameter_overrides = "Stage=prod"
 region = "ap-southeast-1"
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = false
-s3_bucket = "toolshare-sam-artifacts-115568633446"
+s3_bucket = "toolshare-sam-artifacts-361769555517"
 s3_prefix = "toolshare"

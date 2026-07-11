@@ -4,8 +4,13 @@ phases:
   install:
     runtime-versions:
       nodejs: 20
+      python: 3.12
     commands:
       - npm ci
+      - pip install --quiet cfn-lint
+      - cd web && npm ci && cd ..
   build:
     commands:
       - npm test
+      - cd web && npm run build && npm test && cd ..
+      - cfn-lint template.yaml pipeline/github-oidc.yaml pipeline/pipeline-template.yaml
