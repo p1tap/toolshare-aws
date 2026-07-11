@@ -1,17 +1,25 @@
 # ToolShare AWS
 
-A serverless tool-rental marketplace on AWS, built CI/CD-first: the
-delivery pipeline goes in on day one, and every feature after that
+A fullstack serverless tool-rental marketplace on AWS, built CI/CD-first:
+the delivery pipeline goes in on day one, and every feature after that
 ships to production through it — canary deploy, automated smoke gate,
-manual approval, automatic rollback on error.
+manual approval, automatic rollback on error. The React web app and the
+API travel through the same pipeline.
 
 ## Architecture
 
 ```mermaid
 flowchart TB
     subgraph Client
+        B[Browser]
         C[curl / API client]
     end
+
+    B --> CF[CloudFront]
+    CF -->|/| WebS3[(S3: web app<br/>private, OAC)]
+    CF -->|/images/*| S3
+    B -->|signup / login| Cognito
+    B -->|JWT| APIGW
 
     subgraph Auth
         Cognito[Cognito User Pool<br/>groups: customer, renter, admin]
@@ -66,13 +74,18 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-    Push[git push] --> Test[test]
-    Test --> DeployStaging[deploy staging]
+    Push[git push] --> Test[test: api + web + cfn-lint]
+    Test --> DeployStaging[deploy staging<br/>sam + web sync/invalidate]
     DeployStaging --> SmokeStaging[smoke gate]
     SmokeStaging --> Approval{manual approval}
-    Approval --> DeployProd[deploy prod]
+    Approval --> DeployProd[deploy prod<br/>sam + web sync/invalidate]
     DeployProd --> SmokeProd[smoke gate]
 ```
+
+Both tiers ship together: the API deploys via `sam deploy` (CodeDeploy
+canary on the write path), then the web app is built per stage from the
+live stack outputs and published as an atomic `s3 sync` + CloudFront
+invalidation.
 
 Runner: **GitHub Actions**, authenticated to AWS via **OIDC role
 assumption** (`aws-actions/configure-aws-credentials`) — no long-lived
@@ -105,6 +118,22 @@ canary/rollback mechanics — was already runner-agnostic, so the switch
 touched only the pipeline's front door
 (`.github/workflows/pipeline.yml` + `pipeline/github-oidc.yaml`), not
 the application or its deployment strategy.
+
+## Web app
+
+`web/` — React + Vite + TypeScript SPA (Tailwind, react-router). Hosted on
+a **private** S3 bucket behind CloudFront (Origin Access Control); tool
+photos are served by the same distribution under `/images/*` from the
+(also private) images bucket, with a viewer-request CloudFront Function
+stripping the prefix. Auth is Cognito `USER_PASSWORD_AUTH` called
+directly with `fetch` — no AWS SDK in the browser bundle.
+
+Runs fully offline in mock mode (`cd web && npm run dev`, zero config):
+seeded marketplace, simulated auth, and a checkout whose first payment
+attempt deliberately fails so the saga's compensation path is always
+demonstrable. Details in [`web/README.md`](web/README.md).
+
+Live URL: _added after first deploy_ (`WebUrl` stack output).
 
 ## Data model
 
@@ -175,7 +204,8 @@ API_URL=<stack ApiUrl output> npm run smoke
 ## Repo layout
 
 - `template.yaml` — the application (API, Lambdas, DynamoDB, S3,
-  Cognito, SNS/SQS, Step Functions, Secrets Manager)
+  Cognito, SNS/SQS, Step Functions, Secrets Manager, CloudFront web tier)
+- `web/` — the React/TypeScript web app (see `web/README.md`)
 - `pipeline/pipeline-template.yaml` — original CodePipeline/CodeBuild
   stack (kept as reference; account-level CodeBuild quota denial
   described above)
