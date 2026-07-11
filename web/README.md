@@ -35,6 +35,22 @@ called with the Cognito **ID token**; a 401 triggers one refresh-and-retry.
 - `npm test` runs the offline unit tests (price parity with the backend
   rule, Cognito error mapping, token decoding). `npm run build` type-checks.
 
+## Browser E2E (Playwright)
+
+```sh
+npx playwright install --with-deps chromium   # once
+npm run test:e2e
+```
+
+`e2e/golden-path.spec.ts` drives a real Chromium browser through the full
+mock-mode journey in one session: sign up → verify → list a tool → rent
+someone else's → checkout (the mock guarantees the first attempt fails,
+so the compensation banner is always exercised) → retry → return. It runs
+against `npm run dev`'s mock mode, so it needs no AWS and is safe to run
+during the account freeze; CI runs it on every push (`e2e` job in
+`pipeline.yml`). The same journey is the manual runbook for the first
+real-stage smoke test after Phase D deploys.
+
 ## Screenshots
 
 _Placeholder — added after the first deployed run._

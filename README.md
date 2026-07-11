@@ -75,6 +75,7 @@ flowchart TB
 ```mermaid
 flowchart LR
     Push[git push] --> Test[test: api + web + cfn-lint]
+    Test --> E2E[browser E2E<br/>mock mode, Playwright]
     Test --> DeployStaging[deploy staging<br/>sam + web sync/invalidate]
     DeployStaging --> SmokeStaging[smoke gate]
     SmokeStaging --> Approval{manual approval}
@@ -85,7 +86,10 @@ flowchart LR
 Both tiers ship together: the API deploys via `sam deploy` (CodeDeploy
 canary on the write path), then the web app is built per stage from the
 live stack outputs and published as an atomic `s3 sync` + CloudFront
-invalidation.
+invalidation. A Playwright suite drives a real browser through the app's
+mock mode on every push (independent of the deploy jobs, since it needs
+no AWS) — signup → verify → list a tool → rent → checkout-fail →
+compensate → retry → return. See [`web/README.md`](web/README.md#browser-e2e-playwright).
 
 Runner: **GitHub Actions**, authenticated to AWS via **OIDC role
 assumption** (`aws-actions/configure-aws-credentials`) — no long-lived
@@ -216,6 +220,7 @@ API_URL=<stack ApiUrl output> npm run smoke
   helpers
 - `statemachine/checkout.asl.json` — the checkout saga definition
 - `tests/` — Vitest unit tests
+- `web/e2e/` — Playwright browser E2E, mock mode (see `web/README.md`)
 - `scripts/smoke-test.mjs` — post-deploy smoke gate
 - `scripts/teardown.ps1` / `scripts/audit.ps1` — stack teardown and
   cost/resource audit
