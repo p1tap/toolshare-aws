@@ -1,5 +1,9 @@
 # ToolShare AWS
 
+[![CI](https://github.com/p1tap/toolshare-aws/actions/workflows/ci.yml/badge.svg)](https://github.com/p1tap/toolshare-aws/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/p1tap/toolshare-aws)](https://github.com/p1tap/toolshare-aws/releases/latest)
+[![Live](https://img.shields.io/badge/live-CloudFront-8a3ffc)](https://d3sphfxaivnxo6.cloudfront.net)
+
 A full-stack serverless tool-rental marketplace on AWS, built **CI/CD-first**:
 the delivery pipeline was the first thing built, not the last, and every feature
 since ships to production through it — canary deploy, smoke gate, manual
@@ -96,9 +100,17 @@ through an authorized CodeConnection. CodeBuild deploys through a scoped
 service role; no AWS keys are stored in GitHub. The production gate is a
 native CodePipeline manual-approval action.
 
-GitHub Actions remains CI-only: it publishes visible repository checks for
-the backend/frontend build, unit tests, template lint, and mock-mode browser
-journey. It never deploys, so there is one canonical release pipeline.
+The branch workflow in GitHub Actions remains CI-only: it publishes visible
+repository checks for the backend/frontend build, unit tests, template lint,
+and mock-mode browser journey. It never deploys, so there is one canonical
+deployment pipeline.
+
+Version tags add a separate provenance gate: `.github/workflows/release.yml`
+repeats the complete test/build/lint/browser suite, verifies that the tag
+matches `package.json`, packages the production web build with a SHA-256
+checksum, and publishes both to GitHub Releases. A GitHub Release records a
+known-good version; it does not bypass or duplicate the AWS deployment path.
+Release changes are tracked in [`CHANGELOG.md`](CHANGELOG.md).
 
 Every deploy uses `sam deploy`, which drives **CodeDeploy canary
 releases** on the `createTool` Lambda (`Linear10PercentEvery1Minute`)

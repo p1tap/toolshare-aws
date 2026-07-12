@@ -1,0 +1,82 @@
+# A version tag records a tested build; AWS deployments remain owned by
+# CodePipeline so this workflow cannot race the canonical release path.
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+
+      - name: Verify release metadata
+        shell: bash
+        run: |
+          test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
+          test -f ".github/release-notes/$GITHUB_REF_NAME.md"
+
+      - name: Test backend
+        run: |
+          npm ci
+          npm test
+
+      - name: Test and build web app
+        working-directory: web
+        run: |
+          npm ci
+          npm test
+          npm run build
+
+      - name: Lint CloudFormation templates
+        run: pipx run cfn-lint template.yaml pipeline/pipeline-template.yaml
+
+      - name: Run browser golden path
+        working-directory: web
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:e2e
+
+      - name: Package release artifact
+        shell: bash
+        run: |
+          artifact="toolshare-web-$GITHUB_REF_NAME.tar.gz"
+          tar -czf "$artifact" -C web/dist .
+          sha256sum "$artifact" > "$artifact.sha256"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: toolshare-web-${{ github.ref_name }}
+          path: |
+            toolshare-web-${{ github.ref_name }}.tar.gz
+            toolshare-web-${{ github.ref_name }}.tar.gz.sha256
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "toolshare-web-$GITHUB_REF_NAME.tar.gz" \
+            "toolshare-web-$GITHUB_REF_NAME.tar.gz.sha256" \
+            --verify-tag \
+            --title "ToolShare AWS $GITHUB_REF_NAME" \
+            --notes-file ".github/release-notes/$GITHUB_REF_NAME.md"
