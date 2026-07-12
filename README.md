@@ -1,10 +1,10 @@
 # ToolShare AWS
 
-A fullstack serverless tool-rental marketplace on AWS, built CI/CD-first:
-the delivery pipeline goes in on day one, and every feature after that
-ships to production through it — canary deploy, automated smoke gate,
-manual approval, automatic rollback on error. The React web app and the
-API travel through the same pipeline.
+A full-stack serverless tool-rental marketplace on AWS, built **CI/CD-first**:
+the delivery pipeline was the first thing built, not the last, and every feature
+since ships to production through it — canary deploy, smoke gate, manual
+approval, automatic rollback on error. The web app and the API go through the
+same pipeline.
 
 ## Architecture
 
