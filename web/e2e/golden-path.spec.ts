@@ -34,7 +34,7 @@ test.describe.serial("golden path (mock mode)", () => {
     await expect(page.getByText("demo mode")).toBeVisible();
   });
 
-  test("browse: search and type filter narrow the grid", async () => {
+  test("browse: search, category buttons, and sorting update the grid", async () => {
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Rent a tool near you" })).toBeVisible();
 
@@ -48,9 +48,27 @@ test.describe.serial("golden path (mock mode)", () => {
     expect(await cardCount()).toBe(1);
 
     await page.getByPlaceholder("Search tools…").fill("");
-    await page.getByRole("combobox").selectOption("garden");
+    await page.getByRole("button", { name: "garden", exact: true }).click();
     await expect(page.getByText("Hedge Trimmer")).toBeVisible();
     expect(await cardCount()).toBe(1);
+
+    await page.getByRole("button", { name: "all", exact: true }).click();
+    await page.getByRole("button", { name: "Price ↑", exact: true }).click();
+    await expect(page.locator("a[href='/tools/t-ladder']")).toBeVisible();
+    await expect(page.locator("a[href^='/tools/t-']").first()).toHaveAttribute(
+      "href",
+      "/tools/t-ladder"
+    );
+  });
+
+  test("theme preference survives a reload", async () => {
+    const toggle = page.getByRole("button", { name: "Toggle dark mode" });
+    await toggle.click();
+    await expect(page.locator("html")).toHaveClass(/dark/);
+    await expect.poll(() => page.evaluate(() => localStorage.theme)).toBe("dark");
+
+    await page.reload();
+    await expect(page.locator("html")).toHaveClass(/dark/);
   });
 
   test("list a tool and see it in My tools", async () => {
