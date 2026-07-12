@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link, Navigate, NavLink, useLocation } from "react-router";
 import { useAuth } from "../context/auth";
 import { config } from "../config";
@@ -36,6 +36,7 @@ export function Nav() {
           )}
         </nav>
         <div className="ml-auto flex items-center gap-2">
+          <ThemeToggle />
           {config.mock && (
             <span className="hidden rounded-full bg-violet-100 px-2.5 py-0.5 text-xs font-semibold text-violet-700 sm:inline dark:bg-violet-900/50 dark:text-violet-300">
               demo mode
@@ -75,6 +76,28 @@ export function Nav() {
         </div>
       </div>
     </header>
+  );
+}
+
+// ---- Theme toggle -------------------------------------------------------------
+
+function ThemeToggle() {
+  const [dark, setDark] = useState(
+    () => typeof document !== "undefined" && document.documentElement.classList.contains("dark")
+  );
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", dark);
+    try { localStorage.theme = dark ? "dark" : "light"; } catch { /* private mode */ }
+  }, [dark]);
+  return (
+    <button
+      onClick={() => setDark((d) => !d)}
+      aria-label="Toggle dark mode"
+      title={dark ? "Switch to light mode" : "Switch to dark mode"}
+      className="rounded-md px-2.5 py-1.5 text-base text-stone-500 hover:bg-stone-200 dark:text-stone-400 dark:hover:bg-stone-800"
+    >
+      {dark ? "☀️" : "🌙"}
+    </button>
   );
 }
 
@@ -129,12 +152,27 @@ export function StatusBadge({ status }: { status: RentalStatus }) {
 
 // ---- ToolCard --------------------------------------------------------------------
 
+// Deterministic "hot/trending" tag on ~20% of tools — purely cosmetic demo flair,
+// stable per tool so it doesn't flicker between renders.
+const REC_TAGS = ["🔥 Hot", "Trending", "Popular", "Top rated"];
+export function recommendedTag(toolId: string): string | null {
+  let h = 0;
+  for (let i = 0; i < toolId.length; i++) h = (Math.imul(h, 31) + toolId.charCodeAt(i)) >>> 0;
+  return h % 5 === 0 ? REC_TAGS[h % REC_TAGS.length] : null;
+}
+
 export function ToolCard({ tool, footer }: { tool: Tool; footer?: ReactNode }) {
   const img = api.imageUrl(tool);
+  const tag = recommendedTag(tool.toolId);
   return (
     <div className="group overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm transition-shadow hover:shadow-md dark:border-stone-800 dark:bg-stone-900">
       <Link to={`/tools/${tool.toolId}`} className="block">
-        <div className="aspect-[8/5] w-full overflow-hidden bg-stone-100 dark:bg-stone-800">
+        <div className="relative aspect-[8/5] w-full overflow-hidden bg-stone-100 dark:bg-stone-800">
+          {tag && (
+            <span className="absolute left-2 top-2 z-10 rounded-full bg-red-500/95 px-2 py-0.5 text-xs font-bold text-white shadow-sm">
+              {tag}
+            </span>
+          )}
           {img ? (
             <img
               src={img}
